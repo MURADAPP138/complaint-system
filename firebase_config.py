@@ -1,18 +1,16 @@
 import json
 import streamlit as st
 import firebase_admin
-from firebase_admin import credentials, firestore, storage
+from firebase_admin import credentials, firestore
 
-# جلب بيانات مفتاح الخدمة من secrets كـ JSON
-service_account_info = json.loads(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
+# احصل على نص JSON من secrets.toml ثم حوله لقاموس dict
+firebase_config_str = st.secrets["FIREBASE"]["FIREBASE_SERVICE_ACCOUNT"]
+firebase_config = json.loads(firebase_config_str)
 
-# تهيئة التطبيق إذا لم يتم تهيئته بالفعل
+# تأكد من تهيئة firebase مرة واحدة فقط
 if not firebase_admin._apps:
-    cred = credentials.Certificate(service_account_info)
-    firebase_admin.initialize_app(cred, {
-        'storageBucket': 'online-db369.firebasestorage.app'  # عدل حسب bucket الخاص بك
-    })
+    cred = credentials.Certificate(firebase_config)
+    firebase_admin.initialize_app(cred)
 
-# الوصول إلى قاعدة البيانات و التخزين
+# تهيئة قاعدة البيانات
 db = firestore.client()
-bucket = storage.bucket()
