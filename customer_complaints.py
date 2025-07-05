@@ -476,7 +476,7 @@ def display_media_from_links(media_links):
             # Basic check for image/video extension
             lower_link = link.lower()
             if lower_link.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
-                st.image(link, caption=f"صورة {i+1}", use_column_width=False)
+                st.image(link, caption=f"صورة {i+1}", use_container_width=False)
             elif lower_link.endswith(('.mp4', '.mov', '.avi', '.webm')):
                 st.video(link, caption=f"فيديو {i+1}", format="video/mp4", start_time=0)
             else:
@@ -694,7 +694,7 @@ def customer_service_dashboard():
         if uploaded_file:
             st.info("تم رفع الملف للمعاينة. لكي يتم حفظه بشكل دائم، يرجى وضع رابط الملف في خانة 'إضافة رابط صورة/فيديو'.")
             if uploaded_file.type.startswith('image'):
-                st.image(uploaded_file, caption="معاينة الصورة المرفوعة", use_column_width=False)
+                st.image(uploaded_file, caption="معاينة الصورة المرفوعة", use_container_width=False)
             elif uploaded_file.type.startswith('video'):
                 st.video(uploaded_file, caption="معاينة الفيديو المرفوع", format=uploaded_file.type, start_time=0)
 
@@ -879,7 +879,7 @@ def shipping_dashboard():
                         st.info("تم رفع الملفات للمعاينة. لكي يتم حفظها بشكل دائم، يرجى وضع روابط الملفات في خانة 'إضافة رابط صورة/فيديو'.")
                         for i, file in enumerate(uploaded_media):
                             if file.type.startswith('image'):
-                                st.image(file, caption=f"معاينة الصورة المرفوعة {i+1}", use_column_width=False)
+                                st.image(file, caption=f"معاينة الصورة المرفوعة {i+1}", use_container_width=False)
                             elif file.type.startswith('video'):
                                 st.video(file, caption="معاينة الفيديو المرفوع {i+1}", format=file.type, start_time=0)
 
