@@ -48,7 +48,7 @@ translations = {
         "welcome_message": "قسم الأونلاين يرحب بك",
         "customer_service": "خدمة العملاء",
         "shipping_team": "الشحن",
-        "manager": "المدير",
+        "manager": "أدمن",
         "enter_password": "الرجاء إدخال كلمة المرور لـ",
         "login_button": "تسجيل الدخول",
         "incorrect_password": "كلمة المرور خاطئة. الرجاء المحاولة مرة أخرى.",
