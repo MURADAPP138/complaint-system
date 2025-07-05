@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, date, time
 #
 # db = None # Initialize db as None
 # try:
-#     cred = credentials.Certificate(SERVICE_ACCOUNT_KEY_PATH)
+#     cred = credentials.Certificate(SERVICE_Account_KEY_PATH)
 #     if not firebase_admin._apps:
 #         firebase_admin.initialize_app(cred)
 #     db = firestore.client()
@@ -48,7 +48,7 @@ translations = {
         "welcome_message": "قسم الأونلاين يرحب بك",
         "customer_service": "خدمة العملاء",
         "shipping_team": "الشحن",
-        "manager": "أدمن",
+        "manager": "المدير",
         "enter_password": "الرجاء إدخال كلمة المرور لـ",
         "login_button": "تسجيل الدخول",
         "incorrect_password": "كلمة المرور خاطئة. الرجاء المحاولة مرة أخرى.",
@@ -64,6 +64,7 @@ translations = {
         "complaint_time": "وقت الشكوى",
         "employee_name": "اسم موظف خدمة العملاء", # Customer Service employee name
         "customer_name": "اسم العميل",
+        "customer_phone": "هاتف العميل", # New translation
         "issue_description": "تفاصيل الشكوى",
         "add_media_upload": "رفع صورة/فيديو (للمعاينة فقط)", # Text changed
         "add_media_link": "إضافة رابط صورة/فيديو (للحفظ الدائم)", # New text
@@ -476,7 +477,7 @@ def display_media_from_links(media_links):
             # Basic check for image/video extension
             lower_link = link.lower()
             if lower_link.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
-                st.image(link, caption=f"صورة {i+1}", use_container_width=False)
+                st.image(link, caption=f"صورة {i+1}", use_column_width=False)
             elif lower_link.endswith(('.mp4', '.mov', '.avi', '.webm')):
                 st.video(link, caption=f"فيديو {i+1}", format="video/mp4", start_time=0)
             else:
@@ -622,6 +623,7 @@ def customer_service_dashboard():
             st.write(f"**{t['complaint_time']}:** {found_complaint['time']}")
             st.write(f"**{t['employee_name']}:** {found_complaint['employee_name']}")
             st.write(f"**{t['customer_name']}:** {found_complaint['customer_name']}")
+            st.write(f"**📞 {t['customer_phone']}:** {found_complaint.get('customer_phone', 'N/A')}") # Display customer phone
             st.write(f"**{t['complaint_type']}:** {found_complaint['complaint_type']}")
             st.write(f"**{t['issue_description']}:** {found_complaint['issue_description']}")
             st.write(f"**{t['status']}:** {found_complaint['status']}")
@@ -667,7 +669,7 @@ def customer_service_dashboard():
             employee_name = colored_input_container(t['employee_name'], "#f3e5f5", "cs_form_employee_name", default_value=st.session_state.get('employee_name_default', ''))
             st.session_state.employee_name_default = employee_name
 
-        col_type, col_customer = st.columns(2)
+        col_type, col_customer, col_phone = st.columns(3) # Added a column for phone
         with col_type:
             complaint_type = colored_input_container(
                 t['complaint_type'], 
@@ -678,6 +680,9 @@ def customer_service_dashboard():
             )
         with col_customer:
             customer_name = colored_input_container(t['customer_name'], "#ffe0b2", "cs_form_customer_name", placeholder="أدخل اسم العميل")
+        with col_phone: # New phone input
+            customer_phone = colored_input_container(t['customer_phone'], "#d1e7dd", "cs_form_customer_phone", placeholder="أدخل رقم هاتف العميل")
+
 
         issue_description = st.text_area(f"**{t['issue_description']}**", key="cs_new_issue_description", height=150)
         
@@ -694,12 +699,12 @@ def customer_service_dashboard():
         if uploaded_file:
             st.info("تم رفع الملف للمعاينة. لكي يتم حفظه بشكل دائم، يرجى وضع رابط الملف في خانة 'إضافة رابط صورة/فيديو'.")
             if uploaded_file.type.startswith('image'):
-                st.image(uploaded_file, caption="معاينة الصورة المرفوعة", use_container_width=False)
+                st.image(uploaded_file, caption="معاينة الصورة المرفوعة", use_column_width=False)
             elif uploaded_file.type.startswith('video'):
                 st.video(uploaded_file, caption="معاينة الفيديو المرفوع", format=uploaded_file.type, start_time=0)
 
         if st.form_submit_button(f"**{t['submit_complaint']}**"):
-            if complaint_number and customer_name and issue_description and employee_name and complaint_type:
+            if complaint_number and customer_name and issue_description and employee_name and complaint_type and customer_phone: # Added customer_phone to validation
                 # Split links by newline and filter out empty strings
                 parsed_cs_media_links = [link.strip() for link in cs_media_links_input.split('\n') if link.strip()]
 
@@ -709,6 +714,7 @@ def customer_service_dashboard():
                     "time": str(complaint_time),
                     "employee_name": employee_name,
                     "customer_name": customer_name,
+                    "customer_phone": customer_phone, # Save customer phone
                     "complaint_type": complaint_type,
                     "issue_description": issue_description,
                     "cs_media_links": parsed_cs_media_links, # Save media links
@@ -725,7 +731,7 @@ def customer_service_dashboard():
                 st.session_state.complaints = load_complaints_from_firestore()
                 st.rerun()
             else:
-                st.warning("الرجاء ملء جميع الحقول المطلوبة (رقم الشكوى، اسم العميل، تفاصيل الشكوى، اسم الموظف، نوع الشكوى).")
+                st.warning("الرجاء ملء جميع الحقول المطلوبة (رقم الشكوى، اسم العميل، هاتف العميل، تفاصيل الشكوى، اسم الموظف، نوع الشكوى).")
 
     st.markdown("<div class='section-separator'></div>", unsafe_allow_html=True)
 
@@ -751,6 +757,7 @@ def customer_service_dashboard():
             "time": t['complaint_time'],
             "employee_name": t['employee_name'],
             "customer_name": t['customer_name'],
+            "customer_phone": f"📞 {t['customer_phone']}", # Display customer phone with icon
             "complaint_type": t['complaint_type'],
             "issue_description": t['issue_description'],
             "cs_media_links": t['cs_media_links'], # Display media links
@@ -797,6 +804,8 @@ def shipping_dashboard():
                     st.write(f"**{t['complaint_date']}:** {complaint['date']}")
                     st.write(f"**{t['complaint_time']}:** {complaint['time']}")
                     st.write(f"**{t['employee_name']}:** {complaint['employee_name']}")
+                    st.write(f"**{t['customer_name']}:** {complaint['customer_name']}")
+                    st.write(f"**📞 {t['customer_phone']}:** {complaint.get('customer_phone', 'N/A')}") # Display customer phone
                     st.write(f"**{t['complaint_type']}:** {complaint['complaint_type']}")
                     st.write(f"**{t['issue_description']}:** {complaint['issue_description']}")
                     
@@ -879,9 +888,9 @@ def shipping_dashboard():
                         st.info("تم رفع الملفات للمعاينة. لكي يتم حفظها بشكل دائم، يرجى وضع روابط الملفات في خانة 'إضافة رابط صورة/فيديو'.")
                         for i, file in enumerate(uploaded_media):
                             if file.type.startswith('image'):
-                                st.image(file, caption=f"معاينة الصورة المرفوعة {i+1}", use_container_width=False)
+                                st.image(file, caption=f"معاينة الصورة المرفوعة {i+1}", use_column_width=False)
                             elif file.type.startswith('video'):
-                                st.video(file, caption="معاينة الفيديو المرفوع {i+1}", format=file.type, start_time=0)
+                                st.video(file, caption=f"معاينة الفيديو المرفوع {i+1}", format=file.type, start_time=0)
 
                     initial_shipping_status_index = 0
                     if complaint['status'] == "تم الحل":
@@ -948,6 +957,7 @@ def shipping_dashboard():
                     "time": t['complaint_time'],
                     "employee_name": t['employee_name'],
                     "customer_name": t['customer_name'],
+                    "customer_phone": f"📞 {t['customer_phone']}", # Display customer phone with icon
                     "complaint_type": t['complaint_type'],
                     "issue_description": t['issue_description'],
                     "cs_media_links": t['cs_media_links'], # Display CS links
@@ -1062,6 +1072,7 @@ def manager_dashboard():
             st.write(f"**{t['complaint_time']}:** {found_complaint_manager['time']}")
             st.write(f"**{t['employee_name']}:** {found_complaint_manager['employee_name']}")
             st.write(f"**{t['customer_name']}:** {found_complaint_manager['customer_name']}")
+            st.write(f"**📞 {t['customer_phone']}:** {found_complaint_manager.get('customer_phone', 'N/A')}") # Display customer phone
             st.write(f"**{t['complaint_type']}:** {found_complaint_manager['complaint_type']}")
             st.write(f"**{t['issue_description']}:** {found_complaint_manager['issue_description']}")
             st.write(f"**{t['status']}:** {found_complaint_manager['status']}")
@@ -1254,7 +1265,7 @@ def manager_dashboard():
     st.subheader(f"**{t['complaint_table_title']}**")
     if not filtered_df.empty:
         display_cols = [
-            "complaint_number", "customer_name", "employee_name",
+            "complaint_number", "customer_name", "customer_phone", "employee_name", # Added customer_phone
             "complaint_type", "issue_description", "date", "time", "status", 
             "cs_media_links", # Add Customer Service links
             "shipping_response", "shipping_response_employee_name",
@@ -1270,6 +1281,7 @@ def manager_dashboard():
             df_to_display.rename(columns={
                 "complaint_number": t['complaint_number'],
                 "customer_name": t['customer_name'],
+                "customer_phone": f"📞 {t['customer_phone']}", # Display customer phone with icon
                 "employee_name": t['employee_name'],
                 "complaint_type": t['complaint_type'],
                 "issue_description": t['issue_description'],
