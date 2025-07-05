@@ -110,7 +110,7 @@ translations = {
         "response_saved": "تم حفظ رد الشحن بنجاح!",
         "status": "الحالة",
         "complaint_type": "نوع الشكوى",
-        "complaint_type_options": ["Refund", "Cancel", "Delay", "Damage"],
+        "complaint_type_options": ["Refund", "Cancel", "Delay", "Damage&Missing","Edit Info", "Updates"],
         "old_complaints": "الشكاوى القديمة",
         "delete_complaint": "حذف الشكوى",
         "confirm_delete": "هل أنت متأكد من حذف هذه الشكوى؟ هذا الإجراء لا يمكن التراجع عنه.",
