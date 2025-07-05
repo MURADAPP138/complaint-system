@@ -1,22 +1,18 @@
-import os
 import json
+import streamlit as st
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, firestore, storage
 
-# الحالة 1: نحاول نقرأ JSON من Streamlit secrets
-firebase_json = os.environ.get("SERVICE_ACCOUNT_KEY")
+# جلب بيانات مفتاح الخدمة من secrets كـ JSON
+service_account_info = json.loads(st.secrets["FIREBASE_SERVICE_ACCOUNT"])
 
-if firebase_json:
-    # لو موجود (يعني شغال على Streamlit Cloud)، نحمّله من النص
-    firebase_dict = json.loads(firebase_json)
-    cred = credentials.Certificate(firebase_dict)
-else:
-    # لو مش موجود (يعني شغال محليًا)، نقرأ الملف مباشرة
-    with open("serviceAccountKey.json") as f:
-        cred = credentials.Certificate(json.load(f))
+# تهيئة التطبيق إذا لم يتم تهيئته بالفعل
+if not firebase_admin._apps:
+    cred = credentials.Certificate(service_account_info)
+    firebase_admin.initialize_app(cred, {
+        'storageBucket': 'online-db369.firebasestorage.app'  # عدل حسب bucket الخاص بك
+    })
 
-# تهيئة Firebase
-firebase_admin.initialize_app(cred)
-
-# قاعدة البيانات
+# الوصول إلى قاعدة البيانات و التخزين
 db = firestore.client()
+bucket = storage.bucket()
