@@ -162,6 +162,7 @@ translations = {
         "shipping_comment_added_successfully": "تم إرسال رد الشحن بنجاح!", # NEW
         "shipping_comment_employee": "موظف الشحن", # NEW
         "shipping_comment_timestamp": "التاريخ والوقت", # NEW
+        "latest_comment_label": "آخر تعليق جديد", # NEW Translation for label
     }
 }
 
@@ -416,6 +417,48 @@ custom_css = """
         color: #FF8F00; /* Darker amber */
     }
 
+    /* Custom headers for complaint types */
+    .complaint-type-header {
+        background-color: #e0f7fa; /* Default light blue */
+        padding: 10px 15px;
+        border-radius: 8px;
+        margin-top: 20px;
+        margin-bottom: 15px;
+        font-size: 1.3em;
+        font-weight: bold;
+        color: #00796B;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        text-align: right;
+    }
+    /* Specific colors for headers based on type */
+    .complaint-type-header.ارجاع-لقيمة-الطلب { background-color: #FFECB3; color: #E65100; } /* Light Orange */
+    .complaint-type-header.الغاء-الطلب { background-color: #FFCDD2; color: #B71C1C; } /* Light Red */
+    .complaint-type-header.تاخير-استعجال { background-color: #DCEDC8; color: #33691E; } /* Light Green */
+    .complaint-type-header.منتجات-تالفه-ناقصه { background-color: #BBDEFB; color: #1565C0; } /* Light Blue */
+    .complaint-type-header.تحديث-معلومات-الطلب { background-color: #E1BEE7; color: #4A148C; } /* Light Purple */
+    .complaint-type-header.تذكير { background-color: #FFE0B2; color: #BF360C; } /* Light Brown */
+    .complaint-type-header.طلب-توصيل-سريع { background-color: #C8E6C9; color: #2E7D32; } /* A bit darker green */
+
+    /* Style for the latest comment in CS comments section */
+    .latest-cs-comment-container {
+        background-color: #E8F5E9; /* Very light green, or another subtle highlight color */
+        border-left: 4px solid #4CAF50; /* Green border */
+        padding: 8px;
+        border-radius: 5px;
+        margin-top: 5px;
+        margin-bottom: 5px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .latest-cs-comment-label {
+        font-weight: bold;
+        color: #2E7D32; /* Darker green */
+        margin-bottom: 5px;
+        display: block;
+        text-align: right; /* Align label to the right */
+        font-size: 0.9em; /* Smaller font for label */
+    }
+
+
     /* Data table improvements */
     .stDataFrame {
         border-radius: 8px;
@@ -555,7 +598,7 @@ def format_timedelta_to_string(td: timedelta, lang_dict: dict) -> str:
     
     return " ".join(parts)
 
-# NEW: Helper function to format comments/replies for DataFrame display
+# Helper function to format comments/replies for DataFrame display
 def format_comments_for_dataframe_display(comments_list):
     if not comments_list:
         return "لا توجد تعليقات/ردود"
@@ -710,8 +753,13 @@ def customer_service_dashboard():
             # --- Display CS Comments (if any) ---
             if found_complaint.get('cs_comments'):
                 st.markdown(f"**{t['cs_comments_section']}:**")
-                for comment in found_complaint['cs_comments']:
-                    st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"cs_existing_comment_{uuid.uuid4()}")
+                # Highlight the last CS comment
+                for i, comment in enumerate(found_complaint['cs_comments']):
+                    if i == len(found_complaint['cs_comments']) - 1: # Last comment
+                        st.markdown(f"<p class='latest-cs-comment-label'>{t['latest_comment_label']}</p>", unsafe_allow_html=True) # Display the label
+                        st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"cs_existing_comment_{uuid.uuid4()}")
+                    else:
+                        st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"cs_existing_comment_{uuid.uuid4()}")
             
             # --- Display Shipping Comments (if any) ---
             if found_complaint.get('shipping_comments'):
@@ -841,8 +889,13 @@ def customer_service_dashboard():
             # Display existing CS comments
             if selected_complaint_data.get('cs_comments'):
                 st.markdown(f"**{t['cs_comments_section']}**:")
-                for comment in selected_complaint_data['cs_comments']:
-                    st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"cs_existing_comment_{uuid.uuid4()}")
+                # Highlight the last CS comment
+                for i, comment in enumerate(selected_complaint_data['cs_comments']):
+                    if i == len(selected_complaint_data['cs_comments']) - 1: # Last comment
+                        st.markdown(f"<p class='latest-cs-comment-label'>{t['latest_comment_label']}</p>", unsafe_allow_html=True) # Display the label
+                        st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"cs_existing_comment_{uuid.uuid4()}")
+                    else:
+                        st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"cs_existing_comment_{uuid.uuid4()}")
 
             # Display existing Shipping comments (for CS to see their replies)
             if selected_complaint_data.get('shipping_comments'):
@@ -952,25 +1005,40 @@ def shipping_dashboard():
     # Filter complaints
     all_complaints = st.session_state.complaints
     
-    # Complaints with new CS comments
-    # Ensure 'has_new_cs_comment' key exists before filtering
-    new_cs_comments_complaints = [c for c in all_complaints if c.get('has_new_cs_comment', False)] # Use .get() with default
+    # Complaints that have 'has_new_cs_comment' flag set to True
+    # This section will now show ALL complaints with new CS comments, regardless of current status.
+    # This is to ensure no new CS comments are missed by the shipping team.
+    new_cs_comments_to_review = [
+        c for c in all_complaints
+        if c.get('has_new_cs_comment', False)
+    ]
     
-    # New and In-Progress Complaints (excluding those with new CS comments for this view)
-    new_and_in_progress_complaints = [c for c in all_complaints if c['status'] in ["جديد", "قيد المعالجة", "جاري المتابعة"] and not c.get('has_new_cs_comment', False)] # Use .get() with default
+    # New and In-Progress Complaints (primary workflow for shipping).
+    # These should NOT include complaints already highlighted in 'new_cs_comments_to_review'
+    # to avoid duplication in display.
+    new_and_in_progress_complaints_filtered = [ 
+        c for c in all_complaints
+        if c['status'] in ["جديد", "قيد المعالجة", "جاري المتابعة"] and c not in new_cs_comments_to_review
+    ]
     
-    resolved_and_closed_complaints = [c for c in all_complaints if c['status'] in ["تم الحل", "مغلق"]]
+    # Complaints that are resolved/closed and DO NOT have new CS comments.
+    # Also ensure they are not in new_cs_comments_to_review
+    resolved_and_closed_complaints_for_old_section = [
+        c for c in all_complaints
+        if c['status'] in ["تم الحل", "مغلق"] and not c.get('has_new_cs_comment', False)
+    ]
 
-    # --- Complaints with New CS Comments Section ---
+    # --- Complaints with New CS Comments Section (for ALL complaints with new follow-ups) ---
     st.subheader(f"**{t['complaints_with_new_cs_comments']}**")
-    if new_cs_comments_complaints:
-        for complaint in new_cs_comments_complaints:
+    if new_cs_comments_to_review: # Changed from new_cs_comments_on_resolved
+        for complaint in new_cs_comments_to_review: # Changed from new_cs_comments_on_resolved
             doc_id = complaint.get('doc_id')
             if not doc_id:
                 st.warning(f"Complaint without document ID (doc_id): {complaint.get('complaint_number', 'Unknown')}. It will not be updated in Firestore.")
                 continue
 
-            with st.expander(f"🔴 **{t['new_comment_from_cs']}**: شكوى رقم: {complaint['complaint_number']} - العميل: {complaint['customer_name']} - الحالة: {complaint['status']}", expanded=True):
+            # Modified Expander Title
+            with st.expander(f"🔴 **{t['new_comment_from_cs']}**: شكوى رقم: {complaint['complaint_number']} - العميل: {complaint['customer_name']} - الحالة: {complaint['status']} - النوع: {complaint.get('complaint_type', 'N/A')}", expanded=True):
                 st.markdown(f'<div class="cs-comment-highlight">', unsafe_allow_html=True)
                 st.markdown(f"<h4>{t['new_comment_from_cs']}</h4>", unsafe_allow_html=True)
                 st.write(f"**{t['complaint_date']}:** {complaint['date']}")
@@ -988,11 +1056,13 @@ def shipping_dashboard():
                 # Display existing CS comments
                 if complaint.get('cs_comments'):
                     st.markdown(f"**{t['cs_comments_section']}:**")
-                    for comment in complaint['cs_comments']:
-                        st.markdown(f"**{t['cs_comment_employee']}:** {comment.get('employee_name', 'N/A')}")
-                        st.markdown(f"**{t['cs_comment_timestamp']}:** {comment.get('timestamp', 'N/A')}")
-                        st.markdown(f"**{t['comment_content']}:** {comment.get('comment', '')}")
-                        st.markdown("---") # Separator for comments
+                    # Highlight the last CS comment
+                    for i, comment in enumerate(complaint['cs_comments']):
+                        if i == len(complaint['cs_comments']) - 1: # Last comment
+                            st.markdown(f"<p class='latest-cs-comment-label'>{t['latest_comment_label']}</p>", unsafe_allow_html=True) # Display the label
+                            st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_view_cs_comment_{complaint['complaint_number']}_{uuid.uuid4()}") # Unique key
+                        else:
+                            st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_view_cs_comment_{complaint['complaint_number']}_{uuid.uuid4()}") # Unique key
 
                 # Display existing Shipping comments (if any)
                 if complaint.get('shipping_comments'):
@@ -1047,150 +1117,190 @@ def shipping_dashboard():
     with col_new_complaints:
         # --- New and In-Progress Complaints Section ---
         st.subheader(f"**{t['current_complaints']}** (الشكاوى الجديدة وقيد المعالجة)")
-        if new_and_in_progress_complaints:
-            for complaint in new_and_in_progress_complaints:
-                doc_id = complaint.get('doc_id')
-                if not doc_id:
-                    st.warning(f"Complaint without document ID (doc_id): {complaint.get('complaint_number', 'Unknown')}. It will not be updated in Firestore.")
-                    continue
+        
+        # Group complaints by type and sort them
+        complaints_by_type = {}
+        for complaint in new_and_in_progress_complaints_filtered: # Use the filtered list for this section
+            c_type = complaint.get('complaint_type', 'غير محدد')
+            if c_type not in complaints_by_type:
+                complaints_by_type[c_type] = []
+            complaints_by_type[c_type].append(complaint)
 
-                with st.expander(f"**شكوى رقم: {complaint['complaint_number']} - العميل: {complaint['customer_name']} - الحالة: {complaint['status']}**"):
-                    st.write(f"**{t['complaint_date']}:** {complaint['date']}")
-                    st.write(f"**{t['complaint_time']}:** {complaint['time']}")
-                    st.write(f"**{t['employee_name']}:** {complaint['employee_name']}")
-                    st.write(f"**{t['customer_name']}:** {complaint['customer_name']}")
-                    st.write(f"**📞 {t['customer_phone']}:** {complaint.get('customer_phone', 'N/A')}") # Display customer phone
-                    st.write(f"**{t['complaint_type']}:** {complaint['complaint_type']}")
-                    st.write(f"**{t['issue_description']}:** {complaint['issue_description']}")
-                    
-                    if complaint.get('cs_media_links'):
-                        st.markdown(f"**{t['cs_media_links']}:** (مرفقات خدمة العملاء)")
-                        display_media_from_links(complaint['cs_media_links'])
-                    
-                    # Display existing CS comments
-                    if complaint.get('cs_comments'):
-                        st.markdown(f"**{t['cs_comments_section']}:**")
-                        for comment in complaint['cs_comments']:
-                            st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_view_cs_comment_{complaint['complaint_number']}_{uuid.uuid4()}")
+        if complaints_by_type:
+            # Define colors for each complaint type (you can expand this as needed)
+            type_colors = {
+                "ارجاع لقيمة الطلب": "#FFECB3", # Light Orange
+                "الغاء الطلب": "#FFCDD2",      # Light Red
+                "تاخير & استعجال": "#DCEDC8",  # Light Green
+                "منتجات تالفه & ناقصه": "#BBDEFB", # Light Blue
+                "تحديث معلومات الطلب": "#E1BEE7", # Light Purple
+                "تذكير": "#FFE0B2",            # Light Brown
+                "طلب توصيل سريع": "#C8E6C9",   # A bit darker green
+                "غير محدد": "#f0f0f0",         # Grey for undefined
+            }
 
-                    # Display previous shipping media links
-                    if complaint.get('shipping_media_links'):
-                        st.markdown(f"**{t['shipping_media_links']}:** (المرفقات السابقة)")
-                        display_media_from_links(complaint['shipping_media_links'])
+            for c_type in sorted(complaints_by_type.keys()):
+                # Create a clean CSS class name from the type
+                # Handle cases where characters might not be valid in CSS class names
+                css_class = c_type.replace(" ", "-").replace("&", "").replace("أ", "ا").replace("إ", "ا").replace("ئ", "ي").replace("ؤ", "و").replace("ة", "ه").strip().lower()
 
-                    # Display existing Shipping comments (if any)
-                    if complaint.get('shipping_comments'):
-                        st.markdown(f"**{t['shipping_comments_section']}:**")
-                        for comment in complaint['shipping_comments']:
-                            st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_view_shipping_comment_regular_{complaint['complaint_number']}_{uuid.uuid4()}")
+                header_color = type_colors.get(c_type, '#e0f7fa') # Default light blue
 
-                    st.subheader(f"**{t['add_shipping_response']}**")
-                    current_response = complaint.get('shipping_response', '')
-                    response_text = st.text_area(t['response_text'], value=current_response, key=f"shipping_response_{complaint['complaint_number']}", height=100)
-                    
-                    # --- Shipping employee name field ---
-                    current_shipping_employee_name = complaint.get('shipping_response_employee_name', '')
-                    shipping_employee_name_input = st.text_input(
-                        f"**{t['shipping_employee_name']}**",
-                        value=current_shipping_employee_name,
-                        key=f"shipping_employee_name_input_{complaint['complaint_number']}",
-                        placeholder="أدخل اسم موظف الشحن"
-                    )
+                st.markdown(
+                    f'<div class="complaint-type-header {css_class}" style="background-color: {header_color};">'
+                    f'{t["complaint_type"]}: {c_type}'
+                    f'</div>', unsafe_allow_html=True
+                )
+                for complaint in complaints_by_type[c_type]:
+                    doc_id = complaint.get('doc_id')
+                    if not doc_id:
+                        st.warning(f"Complaint without document ID (doc_id): {complaint.get('complaint_number', 'Unknown')}. It will not be updated in Firestore.")
+                        continue
 
-                    # --- New: Shipping Response Date and Time fields ---
-                    col_resp_date, col_resp_time = st.columns(2)
-                    with col_resp_date:
-                        # Default to current date if no previous response date
-                        default_resp_date = datetime.now().date()
-                        if complaint.get('shipping_response_date'):
-                            try:
-                                default_resp_date = datetime.strptime(complaint['shipping_response_date'], '%Y-%m-%d').date()
-                            except ValueError:
-                                pass # Keep default if parsing fails
-                        shipping_response_date_input = colored_input_container(
-                            t['shipping_response_date_input'], 
-                            "#e0f7fa", 
-                            f"shipping_response_date_{complaint['complaint_number']}", 
-                            input_type="date", 
-                            default_value=default_resp_date
+                    # Expander Title (unchanged as type is in header above)
+                    with st.expander(f"**شكوى رقم: {complaint['complaint_number']} - العميل: {complaint['customer_name']} - الحالة: {complaint['status']}**"):
+                        st.write(f"**{t['complaint_date']}:** {complaint['date']}")
+                        st.write(f"**{t['complaint_time']}:** {complaint['time']}")
+                        st.write(f"**{t['employee_name']}:** {complaint['employee_name']}")
+                        st.write(f"**{t['customer_name']}:** {complaint['customer_name']}")
+                        st.write(f"**📞 {t['customer_phone']}:** {complaint.get('customer_phone', 'N/A')}") # Display customer phone
+                        st.write(f"**{t['complaint_type']}:** {complaint['complaint_type']}")
+                        st.write(f"**{t['issue_description']}:** {complaint['issue_description']}")
+                        
+                        if complaint.get('cs_media_links'):
+                            st.markdown(f"**{t['cs_media_links']}:** (مرفقات خدمة العملاء)")
+                            display_media_from_links(complaint['cs_media_links'])
+                        
+                        # Display existing CS comments
+                        if complaint.get('cs_comments'):
+                            st.markdown(f"**{t['cs_comments_section']}:**")
+                            # Highlight the last CS comment
+                            for i, comment in enumerate(complaint['cs_comments']):
+                                if i == len(complaint['cs_comments']) - 1: # Last comment
+                                    st.markdown(f"<p class='latest-cs-comment-label'>{t['latest_comment_label']}</p>", unsafe_allow_html=True) # Display the label
+                                    st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_view_cs_comment_{complaint['complaint_number']}_{uuid.uuid4()}") # Unique key
+                                else:
+                                    st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_view_cs_comment_{complaint['complaint_number']}_{uuid.uuid4()}") # Unique key
+
+                        # Display previous shipping media links
+                        if complaint.get('shipping_media_links'):
+                            st.markdown(f"**{t['shipping_media_links']}:** (المرفقات السابقة)")
+                            display_media_from_links(complaint['shipping_media_links'])
+
+                        # Display existing Shipping comments (if any)
+                        if complaint.get('shipping_comments'):
+                            st.markdown(f"**{t['shipping_comments_section']}:**")
+                            for comment in complaint['shipping_comments']:
+                                st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_view_shipping_comment_regular_{complaint['complaint_number']}_{uuid.uuid4()}")
+
+                        st.subheader(f"**{t['add_shipping_response']}**")
+                        current_response = complaint.get('shipping_response', '')
+                        response_text = st.text_area(t['response_text'], value=current_response, key=f"shipping_response_{complaint['complaint_number']}", height=100)
+                        
+                        # --- Shipping employee name field ---
+                        current_shipping_employee_name = complaint.get('shipping_response_employee_name', '')
+                        shipping_employee_name_input = st.text_input(
+                            f"**{t['shipping_employee_name']}**",
+                            value=current_shipping_employee_name,
+                            key=f"shipping_employee_name_input_{complaint['complaint_number']}",
+                            placeholder="أدخل اسم موظف الشحن"
                         )
-                    with col_resp_time:
-                        # Default to current time if no previous response time
-                        default_resp_time = datetime.now().time()
-                        if complaint.get('shipping_response_time'):
-                            try:
-                                default_resp_time = datetime.strptime(complaint['shipping_response_time'], '%H:%M:%S').time()
-                            except ValueError:
-                                try: # Handle HH:MM format
-                                    default_resp_time = datetime.strptime(complaint['shipping_response_time'], '%H:%M').time()
+
+                        # --- New: Shipping Response Date and Time fields ---
+                        col_resp_date, col_resp_time = st.columns(2)
+                        with col_resp_date:
+                            # Default to current date if no previous response date
+                            default_resp_date = datetime.now().date()
+                            if complaint.get('shipping_response_date'):
+                                try:
+                                    default_resp_date = datetime.strptime(complaint['shipping_response_date'], '%Y-%m-%d').date()
                                 except ValueError:
                                     pass # Keep default if parsing fails
-                        shipping_response_time_input = colored_input_container(
-                            t['shipping_response_time_input'], 
-                            "#e8f5e9", 
-                            f"shipping_response_time_{complaint['complaint_number']}", 
-                            input_type="time", 
-                            default_value=default_resp_time
+                            shipping_response_date_input = colored_input_container(
+                                t['shipping_response_date_input'], 
+                                "#e0f7fa", 
+                                f"shipping_response_date_{complaint['complaint_number']}", 
+                                input_type="date", 
+                                default_value=default_resp_date
+                            )
+                        with col_resp_time:
+                            # Default to current time if no previous response time
+                            default_resp_time = datetime.now().time()
+                            if complaint.get('shipping_response_time'):
+                                try:
+                                    default_resp_time = datetime.strptime(complaint['shipping_response_time'], '%H:%M:%S').time()
+                                except ValueError:
+                                    try: # Handle HH:MM format
+                                        default_resp_time = datetime.strptime(complaint['shipping_response_time'], '%H:%M').time()
+                                    except ValueError:
+                                        pass # Keep default if parsing fails
+                            shipping_response_time_input = colored_input_container(
+                                t['shipping_response_time_input'], 
+                                "#e8f5e9", 
+                                f"shipping_response_time_{complaint['complaint_number']}", 
+                                input_type="time", 
+                                default_value=default_resp_time
+                            )
+
+                        # --- Add field for shipping media links ---
+                        current_shipping_media_links_str = "\n".join(complaint.get('shipping_media_links', []))
+                        shipping_media_links_input = st.text_area(
+                            f"**{t['add_media_link']}** (ضع كل رابط في سطر جديد)",
+                            value=current_shipping_media_links_str,
+                            key=f"shipping_media_links_input_{complaint['complaint_number']}",
+                            height=100,
+                            placeholder="مثال:\nhttps://example.com/image.jpg\nhttps://example.com/video.mp4"
+                        )
+                        
+                        # --- File uploader (for preview only) ---
+                        uploaded_media = st.file_uploader(
+                            f"**{t['add_media_upload']}**", 
+                            type=["jpg", "png", "jpeg", "mp4"], 
+                            accept_multiple_files=True,
+                            key=f"shipping_media_uploader_{complaint['complaint_number']}"
+                        )
+                        if uploaded_media:
+                            st.info("تم رفع الملفات للمعاينة. لكي يتم حفظها بشكل دائم، يرجى وضع روابط الملفات في خانة 'إضافة رابط صورة/فيديو'.")
+                            for i, file in enumerate(uploaded_media):
+                                if file.type.startswith('image'):
+                                    st.image(file, caption=f"معاينة الصورة المرفوعة {i+1}", use_container_width=False)
+                                elif file.type.startswith('video'):
+                                    st.video(file, caption=f"معاينة الفيديو المرفوع {i+1}", format=file.type, start_time=0)
+
+                        initial_shipping_status_index = 0
+                        if complaint['status'] == "تم الحل":
+                            initial_shipping_status_index = 1
+                        elif complaint['status'] in ["قيد المعالجة", "جديد", "جاري المتابعة"]:
+                            initial_shipping_status_index = 0
+                        
+                        selected_shipping_status = st.radio(
+                            "**تحديث حالة الشكوى:**",
+                            options=t['shipping_status_options'],
+                            index=initial_shipping_status_index,
+                            key=f"shipping_status_radio_{complaint['complaint_number']}"
                         )
 
-                    # --- Add field for shipping media links ---
-                    current_shipping_media_links_str = "\n".join(complaint.get('shipping_media_links', []))
-                    shipping_media_links_input = st.text_area(
-                        f"**{t['add_media_link']}** (ضع كل رابط في سطر جديد)",
-                        value=current_shipping_media_links_str,
-                        key=f"shipping_media_links_input_{complaint['complaint_number']}",
-                        height=100,
-                        placeholder="مثال:\nhttps://example.com/image.jpg\nhttps://example.com/video.mp4"
-                    )
-                    
-                    # --- File uploader (for preview only) ---
-                    uploaded_media = st.file_uploader(
-                        f"**{t['add_media_upload']}**", 
-                        type=["jpg", "png", "jpeg", "mp4"], 
-                        accept_multiple_files=True,
-                        key=f"shipping_media_uploader_{complaint['complaint_number']}"
-                    )
-                    if uploaded_media:
-                        st.info("تم رفع الملفات للمعاينة. لكي يتم حفظها بشكل دائم، يرجى وضع روابط الملفات في خانة 'إضافة رابط صورة/فيديو'.")
-                        for i, file in enumerate(uploaded_media):
-                            if file.type.startswith('image'):
-                                st.image(file, caption=f"معاينة الصورة المرفوعة {i+1}", use_container_width=False)
-                            elif file.type.startswith('video'):
-                                st.video(file, caption=f"معاينة الفيديو المرفوع {i+1}", format=file.type, start_time=0)
+                        if st.button(f"**{t['save_response']}**", key=f"save_response_btn_{complaint['complaint_number']}"):
+                            new_status_for_db = selected_shipping_status
+                            
+                            # Parse shipping media links
+                            parsed_shipping_media_links = [link.strip() for link in shipping_media_links_input.split('\n') if link.strip()]
 
-                    initial_shipping_status_index = 0
-                    if complaint['status'] == "تم الحل":
-                        initial_shipping_status_index = 1
-                    elif complaint['status'] in ["قيد المعالجة", "جديد", "جاري المتابعة"]:
-                        initial_shipping_status_index = 0
-                    
-                    selected_shipping_status = st.radio(
-                        "**تحديث حالة الشكوى:**",
-                        options=t['shipping_status_options'],
-                        index=initial_shipping_status_index,
-                        key=f"shipping_status_radio_{complaint['complaint_number']}"
-                    )
-
-                    if st.button(f"**{t['save_response']}**", key=f"save_response_btn_{complaint['complaint_number']}"):
-                        new_status_for_db = selected_shipping_status
-                        
-                        # Parse shipping media links
-                        parsed_shipping_media_links = [link.strip() for link in shipping_media_links_input.split('\n') if link.strip()]
-
-                        update_data = {
-                            "shipping_response": response_text,
-                            "shipping_response_employee_name": shipping_employee_name_input,
-                            "status": new_status_for_db,
-                            "shipping_response_date": str(shipping_response_date_input), # Save as string
-                            "shipping_response_time": str(shipping_response_time_input), # Save as string
-                            "shipping_media_links": parsed_shipping_media_links # Save shipping media links
-                        }
-                        # --- Call Firestore function to update complaint ---
-                        update_complaint_in_firestore(doc_id, update_data)
-                        # --- Reload data from Firestore ---
-                        st.session_state.complaints = load_complaints_from_firestore()
-                        st.rerun()
-                    st.markdown("---")
+                            update_data = {
+                                "shipping_response": response_text,
+                                "shipping_response_employee_name": shipping_employee_name_input,
+                                "status": new_status_for_db,
+                                "shipping_response_date": str(shipping_response_date_input), # Save as string
+                                "shipping_response_time": str(shipping_response_time_input), # Save as string
+                                "shipping_media_links": parsed_shipping_media_links # Save shipping media links
+                            }
+                            # --- Call Firestore function to update complaint ---
+                            update_complaint_in_firestore(doc_id, update_data)
+                            # --- Reload data from Firestore ---
+                            st.session_state.complaints = load_complaints_from_firestore()
+                            st.rerun()
+                        st.markdown("---")
+            st.markdown("<div class='section-separator'></div>", unsafe_allow_html=True) # Separator after each type group
         else:
             st.info("لا توجد شكاوى جديدة أو قيد المعالجة حالياً.")
 
@@ -1200,38 +1310,38 @@ def shipping_dashboard():
 
         search_old_complaint_number = st.text_input(f"**{t['search_old_complaints']}**", placeholder=t['complaint_number'], key="shipping_old_search_number")
         
-        if resolved_and_closed_complaints:
-            old_complaint_types = [t['all']] + list(set(c['complaint_type'] for c in resolved_and_closed_complaints))
+        if resolved_and_closed_complaints_for_old_section:
+            old_complaint_types = [t['all']] + list(set(c['complaint_type'] for c in resolved_and_closed_complaints_for_old_section))
         else:
             old_complaint_types = [t['all']]
 
         filter_old_complaint_type = st.selectbox(f"**{t['filter_by_complaint_type']}**", options=old_complaint_types, key="shipping_old_filter_type")
 
-        filtered_old_complaints = resolved_and_closed_complaints
+        filtered_old_complaints_display = resolved_and_closed_complaints_for_old_section # Start with the filtered list
         if search_old_complaint_number:
-            filtered_old_complaints = [c for c in filtered_old_complaints if c['complaint_number'] == search_old_complaint_number]
+            filtered_old_complaints_display = [c for c in filtered_old_complaints_display if c['complaint_number'] == search_old_complaint_number]
         
         if filter_old_complaint_type != t['all']:
-            filtered_old_complaints = [c for c in filtered_old_complaints if c['complaint_type'] == filter_old_complaint_type]
+            filtered_old_complaints_display = [c for c in filtered_old_complaints_display if c['complaint_type'] == filter_old_complaint_type]
 
 
-        if filtered_old_complaints:
-            df_old_complaints_display = pd.DataFrame(filtered_old_complaints).sort_values(by=['date', 'time'], ascending=[False, False])
+        if filtered_old_complaints_display: # Check if there are complaints after all filters
+            df_old_complaints_display_filtered = pd.DataFrame(filtered_old_complaints_display).sort_values(by=['date', 'time'], ascending=[False, False])
             
             # Ensure all comment columns exist and then format them
             for col_name in ['cs_comments', 'shipping_comments']:
-                if col_name not in df_old_complaints_display.columns:
-                    df_old_complaints_display[col_name] = [[] for _ in range(len(df_old_complaints_display))]
+                if col_name not in df_old_complaints_display_filtered.columns:
+                    df_old_complaints_display_filtered[col_name] = [[] for _ in range(len(df_old_complaints_display_filtered))]
 
-            df_old_complaints_display['cs_comments_formatted'] = df_old_complaints_display['cs_comments'].apply(format_comments_for_dataframe_display)
-            df_old_complaints_display['shipping_comments_formatted'] = df_old_complaints_display['shipping_comments'].apply(format_comments_for_dataframe_display)
+            df_old_complaints_display_filtered['cs_comments_formatted'] = df_old_complaints_display_filtered['cs_comments'].apply(format_comments_for_dataframe_display)
+            df_old_complaints_display_filtered['shipping_comments_formatted'] = df_old_complaints_display_filtered['shipping_comments'].apply(format_comments_for_dataframe_display)
 
             # Drop original list columns before passing to data_editor
-            df_old_complaints_display = df_old_complaints_display.drop(columns=['cs_comments', 'shipping_comments'])
+            df_old_complaints_display_filtered = df_old_complaints_display_filtered.drop(columns=['cs_comments', 'shipping_comments'])
 
 
             st.dataframe(
-                df_old_complaints_display.rename(columns={
+                df_old_complaints_display_filtered.rename(columns={
                     "complaint_number": t['complaint_number'],
                     "date": t['complaint_date'],
                     "time": t['complaint_time'],
@@ -1268,29 +1378,23 @@ def shipping_dashboard():
                 key="shipping_old_complaints_viewer" # Changed key to reflect it's just a viewer
             )
 
-            if not df_old_complaints_display.empty: # Use df_old_complaints_display, not edited_df
-                # When downloading, ensure you drop the *original* list columns and keep the formatted ones
-                df_to_download = df_old_complaints_display.drop(columns=[
-                    'doc_id', 'has_new_cs_comment'
-                    # The original cs_comments and shipping_comments are already dropped.
-                ], errors='ignore')
-                
-                # Rename the formatted columns back to original names for cleaner Excel output
-                df_to_download = df_to_download.rename(columns={
-                    'cs_comments_formatted': t['cs_comments_section'],
-                    'shipping_comments_formatted': t['shipping_comments_section']
-                })
+            # --- Excel Download for Shipping Old Complaints ---
+            df_to_download_shipping_old = df_old_complaints_display_filtered.drop(columns=['doc_id', 'has_new_cs_comment'], errors='ignore')
+            df_to_download_shipping_old = df_to_download_shipping_old.rename(columns={
+                'cs_comments_formatted': t['cs_comments_section'],
+                'shipping_comments_formatted': t['shipping_comments_section']
+            })
 
-                excel_buffer = io.BytesIO()
-                df_to_download.to_excel(excel_buffer, index=False, engine='xlsxwriter')
-                excel_buffer.seek(0)
-                st.download_button(
-                    label=t['download_excel'],
-                    data=excel_buffer,
-                    file_name="old_complaints.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="download_old_complaints_excel"
-                )
+            excel_buffer = io.BytesIO()
+            df_to_download_shipping_old.to_excel(excel_buffer, index=False, engine='xlsxwriter')
+            excel_buffer.seek(0)
+            st.download_button(
+                label=t['download_excel'],
+                data=excel_buffer,
+                file_name="old_complaints.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="download_shipping_old_complaints_excel" # Unique key
+            )
             # NO DELETE BUTTON OR MESSAGE FOR SHIPPING TEAM
 
         else:
