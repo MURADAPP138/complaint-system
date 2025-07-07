@@ -163,6 +163,47 @@ translations = {
         "shipping_comment_employee": "موظف الشحن", # NEW
         "shipping_comment_timestamp": "التاريخ والوقت", # NEW
         "latest_comment_label": "آخر تعليق جديد", # NEW Translation for label
+        "admin_action_request": "اعتماد إجراء إداري", # NEW
+        "request_date": "تاريخ الطلب", # NEW
+        "customer_receipt_date": "تاريخ استلام العميل للطلب", # NEW
+        "shipping_company": "شركة الشحن", # NEW
+        "order_status": "حالة الطلب", # NEW
+        "request_details": "تفاصيل الطلب/الإجراء المطلوب", # NEW
+        "request_media_link": "رابط صورة/فيديو (للطلب)", # NEW
+        "request_employee_name": "اسم موظف الشحن مقدم الطلب", # NEW
+        "submit_request": "إرسال طلب الإجراء الإداري", # NEW
+        "request_submitted_successfully": "تم إرسال طلب الإجراء الإداري بنجاح!", # NEW
+        "new_admin_actions_needed": "شكاوى جديدة تحتاج اعتماد إجراء إداري", # NEW
+        "admin_action_approved": "الإجراء الإداري المعتمد", # NEW - used for form label
+        "approved_by": "معتمد الإجراء", # NEW
+        "submit_approval": "إرسال الاعتماد", # NEW
+        "approval_saved_successfully": "تم حفظ الاعتماد بنجاح!", # NEW
+        "approval_status": "حالة الاعتماد الإداري", # NEW
+        "approval_date": "تاريخ الاعتماد", # NEW
+        "approval_time": "وقت الاعتماد", # NEW
+        "pending_approval": "بانتظار الاعتماد", # NEW
+        "approved": "تم الاعتماد", # NEW
+        "rejected": "تم الرفض", # NEW
+        "no_admin_actions_needed": "لا توجد طلبات اعتماد إجراء إداري جديدة حالياً.", # NEW
+        "no_admin_action_selected": "الرجاء اختيار طلب إجراء إداري للمراجعة.", # NEW
+        "action_details": "تفاصيل الإجراء الإداري", # NEW
+        "action_employee": "اسم موظف الشحن", # NEW
+        "action_status": "حالة طلب الإجراء", # NEW
+        "view_request_details": "عرض تفاصيل الطلب", # NEW
+        "admin_request_id": "معرف طلب الإجراء", # NEW - this will be hidden in display
+        "approved_rejected_requests": "طلبات الإجراء الإداري التي تم التعامل معها", # NEW
+        "request_status_summary": "شكوى تم الرد عليها رقم", # NEW
+        "approved_request_details": "تفاصيل طلب الإجراء المعتمد", # NEW
+        "rejected_request_details": "تفاصيل الرفض", # NEW - Added this translation
+        "approved_by_label": "معتمد الإجراء", # NEW
+        "approval_date_label": "تاريخ الاعتماد", # NEW
+        "approval_time_label": "وقت الاعتماد", # NEW
+        "admin_requests_table_title": "جميع طلبات الإجراء الإداري", # NEW
+        "download_admin_requests_excel": "تحميل طلبات الإجراء الإداري (Excel)", # NEW
+        "delete_selected_requests": "حذف الطلبات المحددة", # NEW
+        "confirm_delete_requests": "هل أنت متأكد من حذف هذه الطلبات؟ هذا الإجراء لا يمكن التراجع عنه.", # NEW
+        "requests_deleted_successfully": "تم حذف الطلبات بنجاح!", # NEW
+        "select_requests_to_delete": "اختر طلبات من الجدول أعلاه لحذفها.", # NEW
     }
 }
 
@@ -185,6 +226,8 @@ if "selected_role" not in st.session_state:
     st.session_state.selected_role = None
 if "complaints" not in st.session_state:
     st.session_state.complaints = []
+if "admin_requests" not in st.session_state: # NEW: To store admin requests
+    st.session_state.admin_requests = []
 
 # --- Firebase functions for data handling ---
 
@@ -267,10 +310,77 @@ def delete_complaint_from_firestore(doc_id):
     else:
         st.warning("قاعدة البيانات غير جاهزة. لن يتم حذف الشكوى.")
 
+# NEW: Firebase functions for admin requests
+def load_admin_requests_from_firestore():
+    """
+    Loads admin action requests from Firestore.
+    """
+    if db:
+        try:
+            requests_ref = db.collection('admin_requests')
+            docs = requests_ref.stream()
+            requests_list = []
+            for doc in docs:
+                data = doc.to_dict()
+                data['request_id'] = doc.id # Store document ID for updates
+                
+                # Ensure all necessary fields exist for old requests
+                data.setdefault('status', t['pending_approval'])
+                data.setdefault('approval_action', '')
+                data.setdefault('approved_by_employee', '')
+                data.setdefault('approval_date', None)
+                data.setdefault('approval_time', None)
+                
+                requests_list.append(data)
+            return requests_list
+        except Exception as e:
+            st.error(f"فشل تحميل طلبات الإجراء الإداري من Firestore: {e}")
+            return []
+    return []
+
+def add_admin_request_to_firestore(request_data):
+    """
+    Adds a new admin action request to Firestore.
+    """
+    if db:
+        try:
+            doc_id = str(uuid.uuid4()) # Generate unique ID for the request
+            db.collection('admin_requests').document(doc_id).set(request_data)
+            st.success(t['request_submitted_successfully'])
+        except Exception as e:
+            st.error(f"حدث خطأ أثناء حفظ طلب الإجراء الإداري: {e}")
+
+def update_admin_request_in_firestore(request_id, update_data):
+    """
+    Updates an existing admin action request in Firestore.
+    """
+    if db:
+        try:
+            request_doc_ref = db.collection('admin_requests').document(request_id)
+            request_doc_ref.update(update_data)
+            st.success(t['approval_saved_successfully'])
+        except Exception as e:
+            st.error(f"حدث خطأ أثناء تحديث طلب الإجراء الإداري: {e}")
+
+def delete_admin_request_from_firestore(request_id): # NEW: Function to delete admin requests
+    """
+    Deletes an admin action request from Firestore.
+    """
+    if db:
+        try:
+            request_doc_ref = db.collection('admin_requests').document(request_id)
+            request_doc_ref.delete()
+            st.success(t['requests_deleted_successfully'])
+        except Exception as e:
+            st.error(f"حدث خطأ أثناء حذف طلب الإجراء الإداري: {e}")
+    else:
+        st.warning("قاعدة البيانات غير جاهزة. لن يتم حذف الطلب.")
+
 
 # Load data when the app starts
 # This will be called once per session or when the script reruns
 st.session_state.complaints = load_complaints_from_firestore()
+st.session_state.admin_requests = load_admin_requests_from_firestore() # NEW: Load admin requests
 
 
 # --- Custom CSS for overall appearance ---
@@ -389,6 +499,21 @@ custom_css = """
     .kpi-card.small-value .value { /* For smaller KPI values like time strings */
         font-size: 1.8em;
     }
+    /* Admin Request Status Badges */
+    .badge {
+        display: inline-block;
+        padding: 0.3em 0.7em;
+        border-radius: 0.8em;
+        font-size: 0.9em;
+        font-weight: bold;
+        text-align: center;
+        vertical-align: middle;
+        margin-right: 5px;
+        margin-bottom: 5px;
+    }
+    .badge.pending { background-color: #ffeb3b; color: #795548; } /* Amber */
+    .badge.approved { background-color: #c8e6c9; color: #2E7D32; } /* Light Green */
+    .badge.rejected { background-color: #ffcdd2; color: #D32F2F; } /* Light Red */
 
 
     /* Specific colors for KPI cards */
@@ -743,7 +868,6 @@ def customer_service_dashboard():
                     st.write(f"**{t['shipping_response_date_kpi']}:** {found_complaint['shipping_response_date']}")
                 if found_complaint.get('shipping_response_time'):
                     st.write(f"**{t['shipping_response_time_kpi']}:** {found_complaint['shipping_response_time']}")
-                # Display shipping media links
                 if found_complaint.get('shipping_media_links'):
                     st.markdown(f"**{t['shipping_media_links']}:**")
                     display_media_from_links(found_complaint['shipping_media_links'])
@@ -752,7 +876,7 @@ def customer_service_dashboard():
 
             # --- Display CS Comments (if any) ---
             if found_complaint.get('cs_comments'):
-                st.markdown(f"**{t['cs_comments_section']}:**")
+                st.markdown(f"**{t['cs_comments_section']}**:")
                 # Highlight the last CS comment
                 for i, comment in enumerate(found_complaint['cs_comments']):
                     if i == len(found_complaint['cs_comments']) - 1: # Last comment
@@ -985,7 +1109,7 @@ def customer_service_dashboard():
             "shipping_comments_display": t['shipping_comments_section'] # Display formatted shipping comments
         }), use_container_width=True, hide_index=True)
     else:
-        st.info(t['no_complaints'])
+        st.info("لا توجد شكاوى حالياً.")
 
     st.markdown("<div class='section-separator'></div>", unsafe_allow_html=True)
 
@@ -1037,8 +1161,12 @@ def shipping_dashboard():
                 st.warning(f"Complaint without document ID (doc_id): {complaint.get('complaint_number', 'Unknown')}. It will not be updated in Firestore.")
                 continue
 
-            # Modified Expander Title
-            with st.expander(f"🔴 **{t['new_comment_from_cs']}**: شكوى رقم: {complaint['complaint_number']} - العميل: {complaint['customer_name']} - الحالة: {complaint['status']} - النوع: {complaint.get('complaint_type', 'N/A')}", expanded=True):
+            # Display title using st.markdown outside of expander for HTML
+            expander_title_html = (
+                f"🔴 **{t['new_comment_from_cs']}**: شكوى رقم: {complaint['complaint_number']} - العميل: {complaint['customer_name']} - الحالة: {complaint['status']} - النوع: {complaint.get('complaint_type', 'N/A')}"
+            )
+            st.markdown(expander_title_html, unsafe_allow_html=True) # Display the HTML title
+            with st.expander(" ", expanded=True): # Removed key as requested
                 st.markdown(f'<div class="cs-comment-highlight">', unsafe_allow_html=True)
                 st.markdown(f"<h4>{t['new_comment_from_cs']}</h4>", unsafe_allow_html=True)
                 st.write(f"**{t['complaint_date']}:** {complaint['date']}")
@@ -1056,7 +1184,7 @@ def shipping_dashboard():
                 # Display existing CS comments
                 if complaint.get('cs_comments'):
                     st.markdown(f"**{t['cs_comments_section']}:**")
-                    # Highlight the last CS comment
+                    # Highlight the last CS comment with a label
                     for i, comment in enumerate(complaint['cs_comments']):
                         if i == len(complaint['cs_comments']) - 1: # Last comment
                             st.markdown(f"<p class='latest-cs-comment-label'>{t['latest_comment_label']}</p>", unsafe_allow_html=True) # Display the label
@@ -1305,6 +1433,117 @@ def shipping_dashboard():
             st.info("لا توجد شكاوى جديدة أو قيد المعالجة حالياً.")
 
     with col_old_complaints:
+        # --- NEW: Add Administrative Action Request Section (Form) ---
+        st.subheader(f"**{t['admin_action_request']}**")
+        with st.form("add_admin_action_request_form", clear_on_submit=True):
+            req_col1, req_col2, req_col3 = st.columns(3)
+            with req_col1:
+                req_complaint_number = colored_input_container(t['complaint_number'], "#e0f7fa", "req_complaint_number", placeholder="أدخل رقم الشكوى")
+            with req_col2:
+                req_request_date = colored_input_container(t['request_date'], "#e8f5e9", "req_request_date", input_type="date")
+            with req_col3:
+                req_customer_receipt_date = colored_input_container(t['customer_receipt_date'], "#fff3e0", "req_customer_receipt_date", input_type="date")
+
+            req_col4, req_col5, req_col6 = st.columns(3)
+            with req_col4:
+                req_shipping_company = colored_input_container(t['shipping_company'], "#f3e5f5", "req_shipping_company", placeholder="أدخل اسم شركة الشحن")
+            with req_col5:
+                req_order_status = colored_input_container(t['order_status'], "#e6ffe6", "req_order_status", placeholder="أدخل حالة الطلب")
+            with req_col6:
+                req_employee_name = colored_input_container(t['request_employee_name'], "#ffe0b2", "req_employee_name", default_value=st.session_state.get('shipping_employee_name_default', ''))
+                st.session_state.shipping_employee_name_default = req_employee_name # Persist name
+
+            req_details = st.text_area(f"**{t['request_details']}**", key="req_details_input", height=150)
+            req_media_link = st.text_input(f"**{t['request_media_link']}** (رابط واحد فقط)", key="req_media_link_input", placeholder="مثال: https://example.com/proof.jpg")
+
+            if st.form_submit_button(f"**{t['submit_request']}**"):
+                if (req_complaint_number and req_request_date and req_customer_receipt_date and
+                    req_shipping_company and req_order_status and req_details and req_employee_name):
+                    
+                    request_data = {
+                        "complaint_number": req_complaint_number,
+                        "request_date": str(req_request_date),
+                        "customer_receipt_date": str(req_customer_receipt_date),
+                        "shipping_company": req_shipping_company,
+                        "order_status": req_order_status,
+                        "request_details": req_details,
+                        "media_link": req_media_link if req_media_link else None, # Store as None if empty
+                        "employee_name": req_employee_name,
+                        "status": t['pending_approval'], # Initial status
+                        "approval_action": "",
+                        "approved_by_employee": "",
+                        "approval_date": None,
+                        "approval_time": None
+                    }
+                    add_admin_request_to_firestore(request_data)
+                    st.session_state.admin_requests = load_admin_requests_from_firestore() # Reload requests
+                    st.rerun()
+                else:
+                    st.warning("الرجاء ملء جميع الخانات المطلوبة لطلب الإجراء الإداري.")
+        
+        st.markdown("<div class='section-separator'></div>", unsafe_allow_html=True)
+        # --- END NEW: Add Administrative Action Request Section (Form) ---
+
+
+        # --- NEW: Approved/Rejected Administrative Actions Display for Shipping Team ---
+        st.subheader(f"**{t['approved_rejected_requests']}**")
+        processed_admin_requests = [req for req in st.session_state.admin_requests if req['status'] in [t['approved'], t['rejected']]]
+
+        if processed_admin_requests:
+            # Sort processed requests by approval date/time, newest first
+            processed_admin_requests_sorted = sorted(processed_admin_requests, 
+                                                     key=lambda x: datetime.strptime(f"{x.get('approval_date', '1900-01-01')} {x.get('approval_time', '00:00:00')}", '%Y-%m-%d %H:%M:%S') if x.get('approval_date') and x.get('approval_time') else datetime.min, 
+                                                     reverse=True)
+            
+            for request in processed_admin_requests_sorted:
+                expander_title = (
+                    f"**{t['request_status_summary']}**: {request.get('complaint_number', 'N/A')} "
+                    f"- الحالة: <span class='badge {request.get('status', '').lower()}'>{request.get('status', 'N/A')}</span>"
+                )
+                # Display the title first with markdown, then the expander
+                st.markdown(expander_title, unsafe_allow_html=True) 
+                with st.expander(" ", expanded=False): # Removed key as requested
+                    # st.write(f"**{t['admin_request_id']}:** {request.get('request_id', 'N/A')}") # Hidden
+                    st.write(f"**{t['complaint_number']}:** {request.get('complaint_number', 'N/A')}")
+                    st.write(f"**{t['action_employee']}:** {request.get('employee_name', 'N/A')}")
+                    st.write(f"**{t['request_date']}:** {request.get('request_date', 'N/A')}")
+                    st.write(f"**{t['customer_receipt_date']}:** {request.get('customer_receipt_date', 'N/A')}")
+                    st.write(f"**{t['shipping_company']}:** {request.get('shipping_company', 'N/A')}")
+                    st.write(f"**{t['order_status']}:** {request.get('order_status', 'N/A')}")
+                    st.write(f"**{t['request_details']}:** {request.get('request_details', 'N/A')}")
+
+                    if request.get('media_link'):
+                        st.markdown(f"**{t['request_media_link']}:**")
+                        display_media_from_links([request['media_link']])
+
+                    st.markdown("---")
+                    # Display based on actual status (Approved or Rejected)
+                    if request.get('status') == t['approved']:
+                        st.markdown(f"**{t['approval_status']}:** <span class='badge approved'>{t['approved']}</span>", unsafe_allow_html=True)
+                        if request.get('approval_action'):
+                            st.write(f"**{t['approved_request_details']}:** {request['approval_action']}") # Corrected key
+                    elif request.get('status') == t['rejected']:
+                        st.markdown(f"**{t['approval_status']}:** <span class='badge rejected'>{t['rejected']}</span>", unsafe_allow_html=True)
+                        if request.get('approval_action'):
+                            st.write(f"**{t['rejected_request_details']}:** {request['approval_action']}") # Corrected key
+                    else: # Fallback for other statuses
+                        st.markdown(f"**{t['approval_status']}:** <span class='badge pending'>{request.get('status', 'N/A')}</span>", unsafe_allow_html=True)
+
+                    if request.get('approved_by_employee'):
+                        st.write(f"**{t['approved_by_label']}:** {request['approved_by_employee']}")
+                    if request.get('approval_date'):
+                        st.write(f"**{t['approval_date_label']}:** {request['approval_date']}")
+                    if request.get('approval_time'):
+                        st.write(f"**{t['approval_time_label']}:** {request['approval_time']}")
+                    st.markdown("---")
+
+        else:
+            st.info("لا توجد طلبات إجراء إداري تم التعامل معها حالياً.")
+
+        st.markdown("<div class='section-separator'></div>", unsafe_allow_html=True)
+        # --- END NEW: Approved/Rejected Administrative Actions Display ---
+
+
         # --- Old Complaints Section (with search and EXCLUDED DELETE OPTION) ---
         st.subheader(f"**{t['old_complaints']}** (الشكاوى التي تم حلها أو إغلاقها)")
 
@@ -1382,7 +1621,7 @@ def shipping_dashboard():
             df_to_download_shipping_old = df_old_complaints_display_filtered.drop(columns=['doc_id', 'has_new_cs_comment'], errors='ignore')
             df_to_download_shipping_old = df_to_download_shipping_old.rename(columns={
                 'cs_comments_formatted': t['cs_comments_section'],
-                'shipping_comments_formatted': t['shipping_comments_section']
+                'shipping_comments_formatted': t['cs_comments_section']
             })
 
             excel_buffer = io.BytesIO()
@@ -1398,7 +1637,7 @@ def shipping_dashboard():
             # NO DELETE BUTTON OR MESSAGE FOR SHIPPING TEAM
 
         else:
-            st.info(t['no_old_complaints'])
+            st.info("لا توجد شكاوى قديمة حالياً.")
 
     st.markdown("<div class='section-separator'></div>", unsafe_allow_html=True)
 
@@ -1436,6 +1675,177 @@ def manager_dashboard():
         df_complaints = pd.DataFrame()
 
     st.markdown("<div class='section-separator'></div>", unsafe_allow_html=True)
+    
+    # --- NEW: Admin Action Requests Section (Manager Approval) ---
+    st.subheader(f"**{t['new_admin_actions_needed']}**")
+    pending_admin_requests = [req for req in st.session_state.admin_requests if req['status'] == t['pending_approval']]
+
+    if pending_admin_requests:
+        # Sort requests by date (e.g., newest first)
+        pending_admin_requests_sorted = sorted(pending_admin_requests, 
+                                               key=lambda x: datetime.strptime(x.get('request_date', '1900-01-01'), '%Y-%m-%d'), 
+                                               reverse=True)
+        
+        # Display each pending request in an expander for full details
+        for req_data in pending_admin_requests_sorted:
+            # Simplified Expander Title: "شكوى جديدة تحتاج اعتماد: رقم الشكوى: [رقم الشكوى] - الحالة: [الحالة]"
+            expander_title_html = (
+                f"**{t['new_admin_actions_needed'].split('جديدة')[0]}**" # "شكاوى "
+                f"جديدة تحتاج اعتماد: رقم الشكوى: {req_data.get('complaint_number', 'N/A')} - "
+                f"الحالة: <span class='badge pending'>{req_data.get('status', 'N/A')}</span>"
+            )
+            # Display the title first with markdown, then the expander
+            st.markdown(expander_title_html, unsafe_allow_html=True) 
+            with st.expander(" ", expanded=False): # Removed key as requested
+                st.markdown(f"### {t['view_request_details']}") # Changed header to be more descriptive
+                # st.write(f"**{t['admin_request_id']}:** {req_data.get('request_id', 'N/A')}") # Hiding this as requested
+                st.write(f"**{t['complaint_number']}:** {req_data.get('complaint_number', 'N/A')}")
+                st.write(f"**{t['request_employee_name']}:** {req_data.get('employee_name', 'N/A')}")
+                st.write(f"**{t['request_date']}:** {req_data.get('request_date', 'N/A')}")
+                st.write(f"**{t['customer_receipt_date']}:** {req_data.get('customer_receipt_date', 'N/A')}")
+                st.write(f"**{t['shipping_company']}:** {req_data.get('shipping_company', 'N/A')}")
+                st.write(f"**{t['order_status']}:** {req_data.get('order_status', 'N/A')}")
+                st.write(f"**{t['request_details']}:** {req_data.get('request_details', 'N/A')}")
+
+                if req_data.get('media_link'):
+                    st.markdown(f"**{t['request_media_link']}:**")
+                    display_media_from_links([req_data['media_link']])
+                
+                st.markdown("---")
+                st.subheader(f"**{t['admin_action_approved']}**")
+                with st.form(f"admin_approval_form_{req_data['request_id']}", clear_on_submit=True): # Unique key for form
+                    approved_action_text_input = st.text_area(f"**{t['admin_action_approved']}**", key=f"approved_action_input_{req_data['request_id']}", height=150, value=req_data.get('approval_action', ''))
+                    approved_by_name = colored_input_container(f"**{t['approved_by']}**", "#f3e5f5", f"approved_by_name_{req_data['request_id']}", default_value=st.session_state.get('manager_name_default', ''))
+                    st.session_state.manager_name_default = approved_by_name
+
+                    col_approve1, col_approve2 = st.columns(2)
+                    with col_approve1:
+                        approve_button = st.form_submit_button(f"**{t['approved']}**")
+                    with col_approve2:
+                        reject_button = st.form_submit_button(f"**{t['rejected']}**")
+
+                    if approve_button or reject_button:
+                        if approved_action_text_input and approved_by_name: # Use the local variable name here
+                            current_datetime = datetime.now()
+                            status_to_update = t['approved'] if approve_button else t['rejected']
+                            update_data = {
+                                "status": status_to_update,
+                                "approval_action": approved_action_text_input, # Store the actual text from the input
+                                "approved_by_employee": approved_by_name,
+                                "approval_date": current_datetime.strftime("%Y-%m-%d"),
+                                "approval_time": current_datetime.strftime("%H:%M:%S")
+                            }
+                            update_admin_request_in_firestore(req_data['request_id'], update_data) # Use request_id
+                            st.session_state.admin_requests = load_admin_requests_from_firestore() # Reload requests
+                            st.session_state.complaints = load_complaints_from_firestore() # Reload complaints as well for potential linking
+                            st.rerun()
+                        else:
+                            st.warning("الرجاء ملء حقل الإجراء الإداري واسم معتمد الإجراء.")
+            st.markdown("---") # Separator between request forms
+    else:
+        st.info(t['no_admin_actions_needed'])
+
+    st.markdown("<div class='section-separator'></div>", unsafe_allow_html=True)
+    # --- END NEW: Admin Action Requests Section ---
+
+    # --- NEW: Table of all Administrative Action Requests ---
+    st.subheader(f"**{t['admin_requests_table_title']}**")
+    if st.session_state.admin_requests:
+        df_admin_requests = pd.DataFrame(st.session_state.admin_requests)
+        
+        # Add a checkbox column for deletion
+        df_admin_requests['اختر للحذف'] = False 
+
+        # Format dates/times for display
+        df_admin_requests['request_date_display'] = df_admin_requests['request_date'].apply(lambda x: x if x else 'N/A')
+        df_admin_requests['customer_receipt_date_display'] = df_admin_requests['customer_receipt_date'].apply(lambda x: x if x else 'N/A')
+        df_admin_requests['approval_date_display'] = df_admin_requests['approval_date'].apply(lambda x: x if x else 'N/A')
+        df_admin_requests['approval_time_display'] = df_admin_requests['approval_time'].apply(lambda x: x if x else 'N/A')
+
+        edited_df_admin_requests = st.data_editor(
+            df_admin_requests.rename(columns={
+                "complaint_number": t['complaint_number'],
+                "request_date_display": t['request_date'],
+                "customer_receipt_date_display": t['customer_receipt_date'],
+                "shipping_company": t['shipping_company'],
+                "order_status": t['order_status'],
+                "request_details": t['request_details'],
+                "media_link": t['request_media_link'],
+                "employee_name": t['request_employee_name'],
+                "status": t['action_status'],
+                "approval_action": t['approved_request_details'], # Use approved_request_details for column name
+                "approved_by_employee": t['approved_by_label'],
+                "approval_date_display": t['approval_date_label'],
+                "approval_time_display": t['approval_time_label'],
+                "request_id": t['admin_request_id'], # Keep request_id here for deletion logic
+            }),
+            column_config={
+                "اختر للحذف": st.column_config.CheckboxColumn( # Checkbox for deletion
+                    "اختر للحذف",
+                    help="اختر الطلبات التي تريد حذفها",
+                    default=False,
+                ),
+                t['admin_request_id']: st.column_config.TextColumn(t['admin_request_id'], disabled=True, width="small"),
+                t['request_media_link']: st.column_config.LinkColumn(t['request_media_link'], help="رابط الصورة/الفيديو المرفق بالطلب"),
+                # Make other columns read-only as this is just a display table
+                t['complaint_number']: st.column_config.TextColumn(t['complaint_number'], disabled=True),
+                t['request_date']: st.column_config.TextColumn(t['request_date'], disabled=True),
+                t['customer_receipt_date']: st.column_config.TextColumn(t['customer_receipt_date'], disabled=True),
+                t['shipping_company']: st.column_config.TextColumn(t['shipping_company'], disabled=True),
+                t['order_status']: st.column_config.TextColumn(t['order_status'], disabled=True),
+                t['request_details']: st.column_config.TextColumn(t['request_details'], disabled=True),
+                t['request_employee_name']: st.column_config.TextColumn(t['request_employee_name'], disabled=True),
+                t['action_status']: st.column_config.TextColumn(t['action_status'], disabled=True),
+                t['approved_request_details']: st.column_config.TextColumn(t['approved_request_details'], disabled=True),
+                t['approved_by_label']: st.column_config.TextColumn(t['approved_by_label'], disabled=True),
+                t['approval_date_label']: st.column_config.TextColumn(t['approval_date_label'], disabled=True),
+                t['approval_time_label']: st.column_config.TextColumn(t['approval_time_label'], disabled=True),
+            },
+            hide_index=True,
+            use_container_width=True,
+            key="manager_admin_requests_table" # Unique key
+        )
+
+        # Manager Delete Logic for Admin Requests
+        selected_for_deletion_admin_requests = edited_df_admin_requests[edited_df_admin_requests['اختر للحذف'] == True][t['admin_request_id']].tolist()
+
+        if selected_for_deletion_admin_requests:
+            st.warning(t['confirm_delete_requests'])
+            if st.button(f"**{t['delete_selected_requests']}**", key="manager_delete_admin_requests_btn"):
+                for request_id_to_delete in selected_for_deletion_admin_requests:
+                    delete_admin_request_from_firestore(request_id_to_delete)
+                st.session_state.admin_requests = load_admin_requests_from_firestore() # Reload requests after deletion
+                st.rerun()
+        elif not df_admin_requests.empty:
+            st.info(t['select_requests_to_delete'])
+
+
+        excel_buffer_admin_requests = io.BytesIO()
+        # Drop internal IDs and original unformatted date/time columns before export
+        df_admin_requests_export = df_admin_requests.drop(columns=[
+            'request_id', 'request_date', 'customer_receipt_date', 'approval_date', 'approval_time', 'اختر للحذف'
+        ], errors='ignore').rename(columns={
+            "request_date_display": t['request_date'],
+            "customer_receipt_date_display": t['customer_receipt_date'],
+            "approval_date_display": t['approval_date_label'],
+            "approval_time_display": t['approval_time_label'],
+            "approval_action": t['approved_request_details'], # Use new display text for Excel
+        })
+        df_admin_requests_export.to_excel(excel_buffer_admin_requests, index=False, engine='xlsxwriter')
+        excel_buffer_admin_requests.seek(0)
+        st.download_button(
+            label=t['download_admin_requests_excel'],
+            data=excel_buffer_admin_requests,
+            file_name="admin_action_requests_report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="download_admin_requests_excel_btn"
+        )
+    else:
+        st.info("لا توجد طلبات إجراء إداري في النظام حالياً.")
+
+    st.markdown("<div class='section-separator'></div>", unsafe_allow_html=True)
+
+
     st.subheader(f"**{t['search_specific_complaint']}**")
 
     search_complaint_number_manager = st.text_input(f"**{t['complaint_number']}**", placeholder="أدخل رقم الشكوى للبحث", key="manager_search_complaint_number")
