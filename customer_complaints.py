@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 import uuid
 from datetime import datetime, timedelta, date, time
+import io
+import ast
+
 
 # --- Import db from firebase_config.py ---
 # This assumes you have a firebase_config.py file in the same directory
@@ -18,21 +21,19 @@ from datetime import datetime, timedelta, date, time
 #
 # db = None # Initialize db as None
 # try:
-#     cred = credentials.Certificate(SERVICE_ACCOUNT_KEY_PATH)
-#     if not firebase_admin._apps:
-#         firebase_admin.initialize_app(cred)
-#     db = firestore.client()
-#     # You can add a Streamlit message here if you want to confirm initialization
-#     # st.success("Firebase Admin SDK initialized successfully!")
+#       cred = credentials.Certificate(SERVICE_ACCOUNT_KEY_PATH)
+#       if not firebase_admin._apps:
+#           firebase_admin.initialize_app(cred)
+#       db = firestore.client()
+#       # You can add a Streamlit message here if you want to confirm initialization
+#       # st.success("Firebase Admin SDK initialized successfully!")
 # except Exception as e:
-#     # Log the error, but don't stop the app from running if db is None
-#     print(f"Failed to initialize Firebase Admin SDK. Check service account key path or permissions: {e}")
-#     # st.error(f"Failed to initialize Firebase Admin SDK. Please check the service account key file.")
+#       # Log the error, but don't stop the app from running if db is None
+#       print(f"Failed to initialize Firebase Admin SDK. Check service account key path or permissions: {e}")
+#       # st.error(f"Failed to initialize Firebase Admin SDK. Please check the service account key file.")
 #
 from firebase_config import db # Assuming db is initialized and exported from here
 
-import os
-import io
 
 # --- Page settings and translations ---
 st.set_page_config(
@@ -112,9 +113,9 @@ translations = {
         "complaint_type": "نوع الشكوى",
         "complaint_type_options": ["ارجاع لقيمة الطلب", "الغاء الطلب", "تاخير & استعجال", "منتجات تالفه & ناقصه","تحديث معلومات الطلب", "تذكير","طلب توصيل سريع"],
         "old_complaints": "الشكاوى القديمة",
-        "delete_complaint": "حذف الشكوى",
-        "confirm_delete": "هل أنت متأكد من حذف هذه الشكوى؟ هذا الإجراء لا يمكن التراجع عنه.",
-        "complaint_deleted": "تم حذف الشكوى بنجاح!",
+        "delete_complaint": "أرشفة الشكوى (حذف ناعم)", # Changed for soft delete
+        "confirm_delete": "هل أنت متأكد من أرشفة هذه الشكوى؟ لن يتم حذفها نهائياً ولكن ستخفى من العرض.", # Changed for soft delete
+        "complaint_deleted": "تم أرشفة الشكوى بنجاح!", # Changed for soft delete
         "no_old_complaints": "لا توجد شكاوى قديمة حالياً.",
         "in_progress_complaints": "الشكاوى قيد المعالجة",
         "closed_complaints": "الشكاوى المغلقة",
@@ -204,6 +205,7 @@ translations = {
         "confirm_delete_requests": "هل أنت متأكد من حذف هذه الطلبات؟ هذا الإجراء لا يمكن التراجع عنه.", # NEW
         "requests_deleted_successfully": "تم حذف الطلبات بنجاح!", # NEW
         "select_requests_to_delete": "اختر طلبات من الجدول أعلاه لحذفها.", # NEW
+        "upload_excel_complaints": "رفع ملف Excel للشكاوى", # NEW
     }
 }
 
@@ -235,12 +237,14 @@ def load_complaints_from_firestore():
     """
     Loads complaints from Firestore.
     Ensures all loaded complaints have necessary fields with default values if missing.
+    Filters out complaints marked as is_deleted=True.
     """
     if db: # Check if db is initialized from firebase_config
         try:
             with st.spinner("جاري تحميل الشكاوى..."): # Added spinner
                 complaints_ref = db.collection('complaints')
-                docs = complaints_ref.stream()
+                # Filter out soft-deleted complaints
+                docs = complaints_ref.where('is_deleted', '==', False).stream()
                 complaints_list = []
                 for doc in docs:
                     data = doc.to_dict()
@@ -254,7 +258,26 @@ def load_complaints_from_firestore():
                     data.setdefault('shipping_response_time', None)
                     data.setdefault('shipping_media_links', [])
                     data.setdefault('shipping_response_employee_name', '')
-                    data.setdefault('shipping_comments', []) 
+                    data.setdefault('shipping_comments', [])
+                    data.setdefault('is_deleted', False) # Crucial for soft delete
+                    data.setdefault('deleted_at', None)
+                    data.setdefault('deleted_by', '')
+
+                    # --- NEW: Standardize 'date' field to datetime.date object ---
+                    # Attempt to parse 'date' field into a datetime.date object
+                    if 'date' in data and data['date']:
+                        try:
+                            # Try to parse with common date formats
+                            if isinstance(data['date'], str):
+                                data['date'] = pd.to_datetime(data['date'], errors='coerce').date()
+                            elif isinstance(data['date'], (datetime, date)):
+                                data['date'] = data['date'].date()
+                            else: # Fallback for unexpected types
+                                data['date'] = None
+                        except Exception:
+                            data['date'] = None # Set to None if parsing fails
+                    else:
+                        data['date'] = None # Ensure it's None if empty or missing
 
                     complaints_list.append(data)
                 return complaints_list
@@ -295,20 +318,145 @@ def update_complaint_in_firestore(doc_id, update_data):
     else:
         st.warning("قاعدة البيانات غير جاهزة. لن يتم تحديث الرد بشكل دائم.")
 
-def delete_complaint_from_firestore(doc_id):
+def soft_delete_complaint_in_firestore(doc_id, manager_name):
     """
-    Deletes a complaint from Firestore.
+    Performs a soft delete on a complaint by setting 'is_deleted' to True.
     """
     if db:
         try:
-            with st.spinner("جاري حذف الشكوى..."): # Added spinner
+            with st.spinner(f"جاري أرشفة الشكوى رقم {doc_id}..."): # Added spinner
                 complaint_doc_ref = db.collection('complaints').document(doc_id)
-                complaint_doc_ref.delete()
-                st.success(t['complaint_deleted'])
+                complaint_doc_ref.update({
+                    "is_deleted": True,
+                    "deleted_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "deleted_by": manager_name
+                })
+                st.success(t['complaint_deleted']) # Re-using the translation for "deleted successfully"
         except Exception as e:
-            st.error(f"حدث خطأ أثناء حذف الشكوى: {e}")
+            st.error(f"حدث خطأ أثناء أرشفة الشكوى: {e}")
     else:
-        st.warning("قاعدة البيانات غير جاهزة. لن يتم حذف الشكوى.")
+        st.warning("قاعدة البيانات غير جاهزة. لن يتم أرشفة الشكوى.")
+
+# NEW: Firebase function to add or update complaints from Excel
+def add_or_update_complaint_from_excel_to_firestore(complaint_data_from_excel):
+    """
+    Adds a new complaint or updates an existing one in Firestore
+    based on the complaint_number from Excel data, ensuring required fields.
+    """
+    if db:
+        try:
+            complaint_number = complaint_data_from_excel.get('complaint_number')
+            if not complaint_number:
+                st.error("رقم الشكوى مفقود في أحد صفوف ملف Excel. سيتم تخطي هذا الصف.")
+                return False
+
+            doc_ref = db.collection('complaints').document(str(complaint_number))
+
+            # Prepare data: ensure all expected fields are present with defaults if missing
+            # This is crucial when importing from Excel which might miss new fields
+            # and to handle potential parsing issues for lists/dates
+            data_to_save = {
+                "complaint_number": str(complaint_data_from_excel.get("complaint_number", "")),
+                "date": complaint_data_from_excel.get("date"),
+                "time": complaint_data_from_excel.get("time"),
+                "employee_name": complaint_data_from_excel.get("employee_name", ""),
+                "customer_name": complaint_data_from_excel.get("customer_name", ""),
+                "customer_phone": str(complaint_data_from_excel.get("customer_phone", "N/A")),
+                "complaint_type": complaint_data_from_excel.get("complaint_type", t['complaint_type_options'][0]),
+                "issue_description": complaint_data_from_excel.get("issue_description", ""),
+                "cs_media_links": [], # Will be parsed below
+                "status": complaint_data_from_excel.get("status", t['status_options'][0]),
+                "shipping_response": complaint_data_from_excel.get("shipping_response", ""),
+                "shipping_response_date": complaint_data_from_excel.get("shipping_response_date"),
+                "shipping_response_time": complaint_data_from_excel.get("shipping_response_time"),
+                "shipping_media_links": [], # Will be parsed below
+                "shipping_response_employee_name": complaint_data_from_excel.get("shipping_response_employee_name", ""),
+                "cs_comments": [], # Will be parsed below
+                "has_new_cs_comment": complaint_data_from_excel.get("has_new_cs_comment", False),
+                "shipping_comments": [], # Will be parsed below
+                "is_deleted": complaint_data_from_excel.get("is_deleted", False),
+                "deleted_at": complaint_data_from_excel.get("deleted_at", None),
+                "deleted_by": complaint_data_from_excel.get("deleted_by", "")
+            }
+            
+            # --- Data type conversions and parsing from Excel string format ---
+            # Dates: Ensure they are strings in 'YYYY-MM-DD' format
+            for field in ['date', 'shipping_response_date', 'deleted_at']:
+                if isinstance(data_to_save[field], pd.Timestamp):
+                    data_to_save[field] = data_to_save[field].strftime('%Y-%m-%d')
+                elif data_to_save[field] is not None and not isinstance(data_to_save[field], str):
+                    # Attempt to convert to string date, handling potential datetime objects from Excel
+                    # Safely convert to string and then take the date part
+                    data_to_save[field] = str(data_to_save[field]).split(' ')[0] if isinstance(str(data_to_save[field]), str) and ' ' in str(data_to_save[field]) else str(data_to_save[field])
+                elif data_to_save[field] == 'NaT': # Handle pandas Not a Time
+                    data_to_save[field] = None
+
+
+            # Times: Ensure they are strings in 'HH:MM:SS' format
+            for field in ['time', 'shipping_response_time']:
+                if isinstance(data_to_save[field], datetime):
+                    data_to_save[field] = data_to_save[field].strftime('%H:%M:%S')
+                elif isinstance(data_to_save[field], time): # If it's a Python time object
+                    data_to_save[field] = data_to_save[field].strftime('%H:%M:%S')
+                elif data_to_save[field] is not None and not isinstance(data_to_save[field], str):
+                    # For numbers that might represent time (e.g., from Excel time format)
+                    try:
+                        if isinstance(data_to_save[field], (int, float)):
+                            total_seconds = int(data_to_save[field] * 24 * 3600)
+                            hours = total_seconds // 3600
+                            minutes = (total_seconds % 3600) // 60
+                            seconds = total_seconds % 60
+                            data_to_save[field] = f"{hours:02}:{minutes:02}:{seconds:02}"
+                        else:
+                            data_to_save[field] = str(data_to_save[field])
+                    except:
+                        data_to_save[field] = str(data_to_save[field])
+                elif data_to_save[field] == 'NaT': # Handle pandas Not a Time
+                    data_to_save[field] = None
+                
+                # If time is just HH:MM, convert to HH:MM:SS
+                if isinstance(data_to_save[field], str) and len(data_to_save[field]) == 5 and data_to_save[field].count(':') == 1:
+                    data_to_save[field] += ':00'
+
+
+            # Media Links: Split string by newline into a list
+            for field in ['cs_media_links', 'shipping_media_links']:
+                links_str = complaint_data_from_excel.get(field, '')
+                if pd.notna(links_str) and isinstance(links_str, str):
+                    data_to_save[field] = [link.strip() for link in links_str.split('\n') if link.strip()]
+                else:
+                    data_to_save[field] = [] # Ensure it's an empty list if not a valid string
+
+            # Comments: This is tricky. Assuming they are exported as a single string.
+            # If the original comments were lists of dicts, and you exported them as a single string in Excel,
+            # re-parsing them back into a list of dicts might require a more complex parser (e.g., trying ast.literal_eval if they were JSON-like strings).
+            # For simplicity, if the Excel cell contains a long string, we'll store it as a single comment object.
+            for field, excel_col_name in [('cs_comments', t['cs_comments_section']), ('shipping_comments', t['shipping_comments_section'])]:
+                comments_str = complaint_data_from_excel.get(excel_col_name, '')
+                if pd.notna(comments_str) and isinstance(comments_str, str) and comments_str != "لا توجد تعليقات/ردود":
+                    try:
+                        # Attempt to parse as list of dicts if it looks like one (e.g., "[{'comment': '...', 'employee_name': '...', ...}]")
+                        parsed_comments = ast.literal_eval(comments_str)
+                        if isinstance(parsed_comments, list):
+                            data_to_save[field] = parsed_comments
+                        else:
+                            # Fallback if not a list, treat as single comment
+                            data_to_save[field] = [{"comment": comments_str, "employee_name": "Excel Import", "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}]
+                    except (ValueError, SyntaxError):
+                        # If parsing as list of dicts fails, treat as a single comment string
+                        data_to_save[field] = [{"comment": comments_str, "employee_name": "Excel Import", "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}]
+                else:
+                    data_to_save[field] = [] # Ensure it's an empty list if not a valid string
+
+
+            doc_ref.set(data_to_save, merge=True) # Use merge=True to update existing fields without overwriting the whole document
+            return True
+        except Exception as e:
+            st.error(f"حدث خطأ أثناء حفظ/تحديث الشكوى {complaint_data_from_excel.get('complaint_number', '')} من Excel: {e}")
+            return False
+    else:
+        st.warning("قاعدة البيانات غير جاهزة. لن يتم حفظ/تحديث الشكوى.")
+        return False
 
 # NEW: Firebase functions for admin requests
 def load_admin_requests_from_firestore():
@@ -544,7 +692,7 @@ custom_css = """
 
     /* Custom headers for complaint types */
     .complaint-type-header {
-        background-color: #e0f7fa; /* Default light blue */
+        background-color: #e0f7fa;
         padding: 10px 15px;
         border-radius: 8px;
         margin-top: 20px;
@@ -556,13 +704,14 @@ custom_css = """
         text-align: right;
     }
     /* Specific colors for headers based on type */
-    .complaint-type-header.ارجاع-لقيمة-الطلب { background-color: #FFECB3; color: #E65100; } /* Light Orange */
-    .complaint-type-header.الغاء-الطلب { background-color: #FFCDD2; color: #B71C1C; } /* Light Red */
-    .complaint-type-header.تاخير-استعجال { background-color: #DCEDC8; color: #33691E; } /* Light Green */
-    .complaint-type-header.منتجات-تالفه-ناقصه { background-color: #BBDEFB; color: #1565C0; } /* Light Blue */
-    .complaint-type-header.تحديث-معلومات-الطلب { background-color: #E1BEE7; color: #4A148C; } /* Light Purple */
-    .complaint-type-header.تذكير { background-color: #FFE0B2; color: #BF360C; } /* Light Brown */
-    .complaint-type-header.طلب-توصيل-سريع { background-color: #C8E6C9; color: #2E7D32; } /* A bit darker green */
+    .complaint-type-header.ارجاع-لقيمة-الطلب { background-color: #FFECB3; color: #E65100; }
+    .complaint-type-header.الغاء-الطلب { background-color: #FFCDD2; color: #B71C1C; }
+    .complaint-type-header.تاخير-استعجال { background-color: #DCEDC8; color: #33691E; }
+    .complaint-type-header.منتجات-تالفه-ناقصه { background-color: #BBDEFB; color: #1565C0; }
+    .complaint-type-header.تحديث-معلومات-الطلب { background-color: #E1BEE7; color: #4A148C; }
+    .complaint-type-header.تذكير { background-color: #FFE0B2; color: #BF360C; }
+    .complaint-type-header.طلب-توصيل-سريع { background-color: #C8E6C9; color: #2E7D32; }
+    .complaint-type-header.غير-محدد { background-color: #f0f0f0; color: #616161; }
 
     /* Style for the latest comment in CS comments section */
     .latest-cs-comment-container {
@@ -665,13 +814,20 @@ def colored_input_container(label, color_hex, key_suffix, input_type="text", opt
         unsafe_allow_html=True
     )
     value = None
+    # For inputs within forms, if 'key' is not handled automatically by Streamlit, it might be required for state management.
+    # However, for forms themselves, the button within gets its key from the form.
+    # The 'key' argument for basic widgets like text_input, date_input etc. is generally needed if they are not inside a form,
+    # or if you have multiple instances of the same widget type.
     if input_type == "text":
         value = st.text_input("", key=f"{key_suffix}_text", label_visibility="collapsed", value=default_value if default_value is not None else "", placeholder=placeholder)
     elif input_type == "date":
+        # Streamlit's st.date_input correctly handles its internal key when inside a form context
         value = st.date_input("", key=f"{key_suffix}_date", label_visibility="collapsed", value=default_value if default_value is not None else datetime.now().date())
     elif input_type == "time":
+        # Streamlit's st.time_input correctly handles its internal key when inside a form context
         value = st.time_input("", key=f"{key_suffix}_time", label_visibility="collapsed", value=default_value if default_value is not None else datetime.now().time())
     elif input_type == "selectbox":
+        # Streamlit's st.selectbox correctly handles its internal key when inside a form context
         value = st.selectbox("", options, key=f"{key_suffix}_select", label_visibility="collapsed", index=options.index(default_value) if default_value in options else 0)
     
     st.markdown("</div>", unsafe_allow_html=True)
@@ -881,15 +1037,13 @@ def customer_service_dashboard():
                 for i, comment in enumerate(found_complaint['cs_comments']):
                     if i == len(found_complaint['cs_comments']) - 1: # Last comment
                         st.markdown(f"<p class='latest-cs-comment-label'>{t['latest_comment_label']}</p>", unsafe_allow_html=True) # Display the label
-                        st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"cs_existing_comment_{uuid.uuid4()}")
-                    else:
-                        st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"cs_existing_comment_{uuid.uuid4()}")
-            
+                    st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"cs_existing_comment_{found_complaint['complaint_number']}_{uuid.uuid4()}")
+                    
             # --- Display Shipping Comments (if any) ---
             if found_complaint.get('shipping_comments'):
                 st.markdown(f"**{t['shipping_comments_section']}:**")
                 for comment in found_complaint['shipping_comments']:
-                    st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_existing_comment_cs_{uuid.uuid4()}")
+                    st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_existing_comment_cs_{found_complaint['complaint_number']}_{uuid.uuid4()}")
         else:
             st.error(f"**{t['complaint_not_found']}**")
     
@@ -903,9 +1057,9 @@ def customer_service_dashboard():
         with col_num:
             complaint_number = colored_input_container(t['complaint_number'], "#e0f7fa", "cs_form_complaint_number", placeholder="أدخل رقم الشكوى")
         with col_date:
-            complaint_date = colored_input_container(t['complaint_date'], "#e8f5e9", "cs_form_complaint_date", input_type="date")
+            complaint_date_val = colored_input_container(t['complaint_date'], "#e8f5e9", "cs_form_complaint_date", input_type="date")
         with col_time:
-            complaint_time = colored_input_container(t['complaint_time'], "#fff3e0", "cs_form_complaint_time", input_type="time")
+            complaint_time_val = colored_input_container(t['complaint_time'], "#fff3e0", "cs_form_complaint_time", input_type="time")
         with col_employee:
             employee_name = colored_input_container(t['employee_name'], "#f3e5f5", "cs_form_employee_name", default_value=st.session_state.get('employee_name_default', ''))
             st.session_state.employee_name_default = employee_name
@@ -944,15 +1098,15 @@ def customer_service_dashboard():
             elif uploaded_file.type.startswith('video'):
                 st.video(uploaded_file, caption="معاينة الفيديو المرفوع", format=uploaded_file.type, start_time=0)
 
-        if st.form_submit_button(f"**{t['submit_complaint']}**"):
+        if st.form_submit_button(f"**{t['submit_complaint']}**"): # FIX: Removed 'key' here
             if complaint_number and customer_name and issue_description and employee_name and complaint_type and customer_phone: # Added customer_phone to validation
                 # Split links by newline and filter out empty strings
                 parsed_cs_media_links = [link.strip() for link in cs_media_links_input.split('\n') if link.strip()]
 
                 new_complaint_data = {
                     "complaint_number": complaint_number,
-                    "date": str(complaint_date),
-                    "time": str(complaint_time),
+                    "date": str(complaint_date_val), # Save as YYYY-MM-DD string
+                    "time": str(complaint_time_val.strftime("%H:%M:%S")), # Save as HH:MM:SS string
                     "employee_name": employee_name,
                     "customer_name": customer_name,
                     "customer_phone": customer_phone, # Save customer phone
@@ -967,7 +1121,10 @@ def customer_service_dashboard():
                     "shipping_response_employee_name": "",
                     "cs_comments": [], # Initialize cs_comments as an empty list
                     "has_new_cs_comment": False, # Initialize new flag
-                    "shipping_comments": [] # Initialize shipping comments
+                    "shipping_comments": [], # Initialize shipping comments
+                    "is_deleted": False, # Default for new complaints
+                    "deleted_at": None,
+                    "deleted_by": ""
                 }
                 # --- Call Firestore function to add complaint ---
                 add_complaint_to_firestore(new_complaint_data)
@@ -1017,22 +1174,20 @@ def customer_service_dashboard():
                 for i, comment in enumerate(selected_complaint_data['cs_comments']):
                     if i == len(selected_complaint_data['cs_comments']) - 1: # Last comment
                         st.markdown(f"<p class='latest-cs-comment-label'>{t['latest_comment_label']}</p>", unsafe_allow_html=True) # Display the label
-                        st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"cs_existing_comment_{uuid.uuid4()}")
-                    else:
-                        st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"cs_existing_comment_{uuid.uuid4()}")
+                    st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"cs_existing_comment_{selected_complaint_data['complaint_number']}_{uuid.uuid4()}")
 
             # Display existing Shipping comments (for CS to see their replies)
             if selected_complaint_data.get('shipping_comments'):
-                st.markdown(f"**{t['shipping_comments_section']}**:")
+                st.markdown(f"**{t['shipping_comments_section']}:**")
                 for comment in selected_complaint_data['shipping_comments']:
-                    st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_existing_comment_cs_view_{uuid.uuid4()}")
+                    st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_existing_comment_cs_view_{selected_complaint_data['complaint_number']}_{uuid.uuid4()}")
 
 
             with st.form("add_cs_comment_form", clear_on_submit=True):
                 comment_text = st.text_area(f"**{t['cs_comment_text']}**", key="cs_comment_input", height=100)
                 comment_employee_name = colored_input_container(t['employee_name'], "#f3e5f5", "cs_comment_employee_name", default_value=st.session_state.get('employee_name_default', ''))
 
-                if st.form_submit_button(f"**{t['submit_comment']}**"):
+                if st.form_submit_button(f"**{t['submit_comment']}**"): # FIX: Removed 'key' here
                     if comment_text and comment_employee_name:
                         current_time = datetime.now()
                         new_comment = {
@@ -1076,7 +1231,7 @@ def customer_service_dashboard():
         if 'doc_id' in display_df.columns:
             display_df = display_df.drop(columns=['doc_id'])
         # Hide shipping-related fields from CS view
-        for col in ['shipping_response_date', 'shipping_response_time', 'shipping_media_links', 'shipping_response_employee_name', 'has_new_cs_comment']: # Hide new flag too
+        for col in ['shipping_response_date', 'shipping_response_time', 'shipping_media_links', 'shipping_response_employee_name', 'has_new_cs_comment', 'is_deleted', 'deleted_at', 'deleted_by']: # Hide new flag too
             if col in display_df.columns:
                 display_df = display_df.drop(columns=[col])
 
@@ -1188,9 +1343,7 @@ def shipping_dashboard():
                     for i, comment in enumerate(complaint['cs_comments']):
                         if i == len(complaint['cs_comments']) - 1: # Last comment
                             st.markdown(f"<p class='latest-cs-comment-label'>{t['latest_comment_label']}</p>", unsafe_allow_html=True) # Display the label
-                            st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_view_cs_comment_{complaint['complaint_number']}_{uuid.uuid4()}") # Unique key
-                        else:
-                            st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_view_cs_comment_{complaint['complaint_number']}_{uuid.uuid4()}") # Unique key
+                        st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_view_cs_comment_{complaint['complaint_number']}_{uuid.uuid4()}") # Unique key
 
                 # Display existing Shipping comments (if any)
                 if complaint.get('shipping_comments'):
@@ -1234,7 +1387,7 @@ def shipping_dashboard():
                 st.markdown('</div>', unsafe_allow_html=True)
                 st.markdown("---")
     else:
-        st.info(t['no_new_cs_comments'])
+        st.info("لا توجد شكاوى عليها تعليقات جديدة من خدمة العملاء حالياً.")
 
     st.markdown("<div class='section-separator'></div>", unsafe_allow_html=True)
 
@@ -1258,13 +1411,13 @@ def shipping_dashboard():
             # Define colors for each complaint type (you can expand this as needed)
             type_colors = {
                 "ارجاع لقيمة الطلب": "#FFECB3", # Light Orange
-                "الغاء الطلب": "#FFCDD2",      # Light Red
+                "الغاء الطلب": "#FFCDD2",     # Light Red
                 "تاخير & استعجال": "#DCEDC8",  # Light Green
                 "منتجات تالفه & ناقصه": "#BBDEFB", # Light Blue
                 "تحديث معلومات الطلب": "#E1BEE7", # Light Purple
                 "تذكير": "#FFE0B2",            # Light Brown
                 "طلب توصيل سريع": "#C8E6C9",   # A bit darker green
-                "غير محدد": "#f0f0f0",         # Grey for undefined
+                "غير محدد": "#f0f0f0",          # Grey for undefined
             }
 
             for c_type in sorted(complaints_by_type.keys()):
@@ -1291,7 +1444,7 @@ def shipping_dashboard():
                         st.write(f"**{t['complaint_time']}:** {complaint['time']}")
                         st.write(f"**{t['employee_name']}:** {complaint['employee_name']}")
                         st.write(f"**{t['customer_name']}:** {complaint['customer_name']}")
-                        st.write(f"**📞 {t['customer_phone']}:** {complaint.get('customer_phone', 'N/A')}") # Display customer phone
+                        st.write(f"**📞 {t['customer_phone']}:** {complaint.get('customer_phone', 'N/A')}")
                         st.write(f"**{t['complaint_type']}:** {complaint['complaint_type']}")
                         st.write(f"**{t['issue_description']}:** {complaint['issue_description']}")
                         
@@ -1302,13 +1455,11 @@ def shipping_dashboard():
                         # Display existing CS comments
                         if complaint.get('cs_comments'):
                             st.markdown(f"**{t['cs_comments_section']}:**")
-                            # Highlight the last CS comment
+                            # Highlight the last CS comment with a label
                             for i, comment in enumerate(complaint['cs_comments']):
                                 if i == len(complaint['cs_comments']) - 1: # Last comment
                                     st.markdown(f"<p class='latest-cs-comment-label'>{t['latest_comment_label']}</p>", unsafe_allow_html=True) # Display the label
-                                    st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_view_cs_comment_{complaint['complaint_number']}_{uuid.uuid4()}") # Unique key
-                                else:
-                                    st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_view_cs_comment_{complaint['complaint_number']}_{uuid.uuid4()}") # Unique key
+                                st.text_area(f"[{comment.get('timestamp', 'N/A')}] {comment.get('employee_name', 'N/A')}", value=comment.get('comment', ''), height=68, disabled=True, key=f"shipping_view_cs_comment_{complaint['complaint_number']}_{uuid.uuid4()}") # Unique key
 
                         # Display previous shipping media links
                         if complaint.get('shipping_media_links'):
@@ -1419,12 +1570,11 @@ def shipping_dashboard():
                                 "shipping_response_employee_name": shipping_employee_name_input,
                                 "status": new_status_for_db,
                                 "shipping_response_date": str(shipping_response_date_input), # Save as string
-                                "shipping_response_time": str(shipping_response_time_input), # Save as string
+                                "shipping_response_time": str(shipping_response_time_input.strftime("%H:%M:%S")), # Save as HH:MM:SS string
                                 "shipping_media_links": parsed_shipping_media_links # Save shipping media links
                             }
                             # --- Call Firestore function to update complaint ---
                             update_complaint_in_firestore(doc_id, update_data)
-                            # --- Reload data from Firestore ---
                             st.session_state.complaints = load_complaints_from_firestore()
                             st.rerun()
                         st.markdown("---")
@@ -1436,7 +1586,10 @@ def shipping_dashboard():
         # --- NEW: Add Administrative Action Request Section (Form) ---
         st.subheader(f"**{t['admin_action_request']}**")
         with st.form("add_admin_action_request_form", clear_on_submit=True):
+            # FIX: Define all columns needed here for the form
             req_col1, req_col2, req_col3 = st.columns(3)
+            req_col4, req_col5, req_col6 = st.columns(3) # FIX: This line was missing
+
             with req_col1:
                 req_complaint_number = colored_input_container(t['complaint_number'], "#e0f7fa", "req_complaint_number", placeholder="أدخل رقم الشكوى")
             with req_col2:
@@ -1444,19 +1597,20 @@ def shipping_dashboard():
             with req_col3:
                 req_customer_receipt_date = colored_input_container(t['customer_receipt_date'], "#fff3e0", "req_customer_receipt_date", input_type="date")
 
-            req_col4, req_col5, req_col6 = st.columns(3)
+            # FIX: Use the defined columns here (req_col4, req_col5, req_col6)
             with req_col4:
                 req_shipping_company = colored_input_container(t['shipping_company'], "#f3e5f5", "req_shipping_company", placeholder="أدخل اسم شركة الشحن")
             with req_col5:
                 req_order_status = colored_input_container(t['order_status'], "#e6ffe6", "req_order_status", placeholder="أدخل حالة الطلب")
-            with req_col6:
+            with req_col6: # FIX: Changed from col_req6
                 req_employee_name = colored_input_container(t['request_employee_name'], "#ffe0b2", "req_employee_name", default_value=st.session_state.get('shipping_employee_name_default', ''))
                 st.session_state.shipping_employee_name_default = req_employee_name # Persist name
 
             req_details = st.text_area(f"**{t['request_details']}**", key="req_details_input", height=150)
             req_media_link = st.text_input(f"**{t['request_media_link']}** (رابط واحد فقط)", key="req_media_link_input", placeholder="مثال: https://example.com/proof.jpg")
 
-            if st.form_submit_button(f"**{t['submit_request']}**"):
+            # FIX: Add a submit button to this form and remove the 'key' argument
+            if st.form_submit_button(f"**{t['submit_request']}**"): # Removed 'key'
                 if (req_complaint_number and req_request_date and req_customer_receipt_date and
                     req_shipping_company and req_order_status and req_details and req_employee_name):
                     
@@ -1500,7 +1654,6 @@ def shipping_dashboard():
                     f"**{t['request_status_summary']}**: {request.get('complaint_number', 'N/A')} "
                     f"- الحالة: <span class='badge {request.get('status', '').lower()}'>{request.get('status', 'N/A')}</span>"
                 )
-                # Display the title first with markdown, then the expander
                 st.markdown(expander_title, unsafe_allow_html=True) 
                 with st.expander(" ", expanded=False): # Removed key as requested
                     # st.write(f"**{t['admin_request_id']}:** {request.get('request_id', 'N/A')}") # Hidden
@@ -1576,7 +1729,7 @@ def shipping_dashboard():
             df_old_complaints_display_filtered['shipping_comments_formatted'] = df_old_complaints_display_filtered['shipping_comments'].apply(format_comments_for_dataframe_display)
 
             # Drop original list columns before passing to data_editor
-            df_old_complaints_display_filtered = df_old_complaints_display_filtered.drop(columns=['cs_comments', 'shipping_comments'])
+            df_old_complaints_display_filtered = df_old_complaints_display_filtered.drop(columns=['cs_comments', 'shipping_comments', 'is_deleted', 'deleted_at', 'deleted_by'])
 
 
             st.dataframe(
@@ -1621,7 +1774,7 @@ def shipping_dashboard():
             df_to_download_shipping_old = df_old_complaints_display_filtered.drop(columns=['doc_id', 'has_new_cs_comment'], errors='ignore')
             df_to_download_shipping_old = df_to_download_shipping_old.rename(columns={
                 'cs_comments_formatted': t['cs_comments_section'],
-                'shipping_comments_formatted': t['cs_comments_section']
+                'shipping_comments_formatted': t['shipping_comments_section'] # Corrected to shipping comments section for export
             })
 
             excel_buffer = io.BytesIO()
@@ -1650,24 +1803,35 @@ def shipping_dashboard():
 def manager_dashboard():
     """
     Manager dashboard.
-    Displays overview and reports.
+    Displays overview and reports, with soft delete and Excel upload.
     """
     st.markdown(f"<h2 style='text-align: center; color: #1f2937;'>{t['manager_dashboard_welcome']}</h2>", unsafe_allow_html=True)
 
     if st.session_state.complaints:
         df_complaints = pd.DataFrame(st.session_state.complaints)
-        df_complaints['date'] = pd.to_datetime(df_complaints['date'])
         
-        # Combine date and time to create datetime objects for proper calculation using pd.to_datetime
-        # This will handle various time string formats gracefully
+        # --- NEW FIX START: Ensure 'date' column is correctly parsed as datetime.date objects for filtering ---
+        # Convert to datetime objects, then extract the date part, then convert to object to be safely stored in DataFrame
+        # Using .copy() to avoid SettingWithCopyWarning
+        df_complaints['date'] = pd.to_datetime(df_complaints['date'], errors='coerce').dt.date.astype('object')
+        # Handle cases where parsing might result in NaT (Not a Time)
+        # Option 1: Exclude these rows from filtering/KPIs (current approach)
+        # Option 2: Assign a default date (e.g., today's date)
+        # For this solution, we will stick to excluding them from calculations if they are NaT.
+        # But for display in the table, NaT values will just show as None/NaN.
+        # If a complaint's 'date' is NaT, it won't pass the date range filter.
+        # --- NEW FIX END ---
+
+        # Combine date and time to create datetime objects for proper calculation (KPIs)
+        # Use errors='coerce' and mixed format to handle potential parsing issues for date and time strings
         df_complaints['complaint_datetime'] = df_complaints.apply(
-            lambda row: pd.to_datetime(f"{row['date'].strftime('%Y-%m-%d')} {row['time']}") if isinstance(row['time'], str) and ':' in row['time'] else pd.NaT, axis=1
+            lambda row: pd.to_datetime(f"{row['date']} {row['time']}", format='mixed', errors='coerce') if pd.notna(row['date']) and pd.notna(row['time']) else pd.NaT, axis=1
         )
         
         if 'shipping_response_date' in df_complaints.columns and 'shipping_response_time' in df_complaints.columns:
-            # Create a combined shipping response datetime, handling potential None values using pd.to_datetime
+            # Create a combined shipping response datetime, handling potential None values
             df_complaints['shipping_response_datetime'] = df_complaints.apply(
-                lambda row: pd.to_datetime(f"{row['shipping_response_date']} {row['shipping_response_time']}") if pd.notna(row['shipping_response_date']) and pd.notna(row['shipping_response_time']) else pd.NaT, axis=1
+                lambda row: pd.to_datetime(f"{row['shipping_response_date']} {row['shipping_response_time']}", format='mixed', errors='coerce') if pd.notna(row['shipping_response_date']) and pd.notna(row['shipping_response_time']) else pd.NaT, axis=1
             )
         else:
             df_complaints['shipping_response_datetime'] = pd.NaT # Use NaT for missing columns
@@ -1694,7 +1858,6 @@ def manager_dashboard():
                 f"جديدة تحتاج اعتماد: رقم الشكوى: {req_data.get('complaint_number', 'N/A')} - "
                 f"الحالة: <span class='badge pending'>{req_data.get('status', 'N/A')}</span>"
             )
-            # Display the title first with markdown, then the expander
             st.markdown(expander_title_html, unsafe_allow_html=True) 
             with st.expander(" ", expanded=False): # Removed key as requested
                 st.markdown(f"### {t['view_request_details']}") # Changed header to be more descriptive
@@ -1743,7 +1906,7 @@ def manager_dashboard():
                             st.warning("الرجاء ملء حقل الإجراء الإداري واسم معتمد الإجراء.")
             st.markdown("---") # Separator between request forms
     else:
-        st.info(t['no_admin_actions_needed'])
+        st.info("لا توجد طلبات اعتماد إجراء إداري جديدة حالياً.")
 
     st.markdown("<div class='section-separator'></div>", unsafe_allow_html=True)
     # --- END NEW: Admin Action Requests Section ---
@@ -1775,8 +1938,8 @@ def manager_dashboard():
                 "status": t['action_status'],
                 "approval_action": t['approved_request_details'], # Use approved_request_details for column name
                 "approved_by_employee": t['approved_by_label'],
-                "approval_date_display": t['approval_date_label'],
-                "approval_time_display": t['approval_time_label'],
+                "approval_date_label": t['approval_date_label'],
+                "approval_time_label": t['approval_time_label'],
                 "request_id": t['admin_request_id'], # Keep request_id here for deletion logic
             }),
             column_config={
@@ -1842,6 +2005,73 @@ def manager_dashboard():
         )
     else:
         st.info("لا توجد طلبات إجراء إداري في النظام حالياً.")
+
+    st.markdown("<div class='section-separator'></div>", unsafe_allow_html=True)
+
+    # --- NEW: Upload Excel Complaints Section ---
+    st.subheader(f"**{t['upload_excel_complaints']}**")
+    st.info("يمكنك رفع ملف Excel يحتوي على بيانات الشكاوى. سيتم تحديث الشكاوى الموجودة وإضافة الشكاوى الجديدة بناءً على رقم الشكوى.")
+
+    uploaded_complaints_file = st.file_uploader(
+        "اختر ملف Excel للرفع",
+        type=["xlsx"],
+        key="upload_manager_complaints_excel",
+        help="تأكد أن الملف بنفس التنسيق والأعمدة التي يتم بها استخراج تقرير الشكاوى التفصيلية."
+    )
+
+    if uploaded_complaints_file:
+        try:
+            df_uploaded_complaints = pd.read_excel(uploaded_complaints_file, engine='openpyxl')
+            st.success("تم قراءة ملف Excel للشكاوى بنجاح.")
+            st.dataframe(df_uploaded_complaints.head(), use_container_width=True) # عرض أول 5 صفوف للمعاينة
+
+            if st.button("بدء رفع وحفظ الشكاوى من Excel إلى قاعدة البيانات", key="start_upload_complaints_excel_to_firestore_btn"):
+                total_rows = len(df_uploaded_complaints)
+                success_count = 0
+                fail_count = 0
+                
+                with st.spinner("جاري حفظ الشكاوى من ملف Excel إلى قاعدة البيانات... قد يستغرق هذا بعض الوقت."):
+                    for index, row in df_uploaded_complaints.iterrows():
+                        complaint_data_from_excel_row = row.to_dict()
+
+                        # Mapping Arabic column names from Excel to Firestore field names (English)
+                        # This mapping MUST accurately reflect the column headers in your exported Excel file
+                        # and the field names in your Firestore documents.
+                        # Make sure all Arabic column names are covered
+                        mapped_data = {
+                            "complaint_number": complaint_data_from_excel_row.get(t['complaint_number']),
+                            "date": complaint_data_from_excel_row.get(t['complaint_date']),
+                            "time": complaint_data_from_excel_row.get(t['complaint_time']),
+                            "employee_name": complaint_data_from_excel_row.get(t['employee_name']),
+                            "customer_name": complaint_data_from_excel_row.get(t['customer_name']),
+                            "customer_phone": complaint_data_from_excel_row.get(f"📞 {t['customer_phone']}"), 
+                            "complaint_type": complaint_data_from_excel_row.get(t['complaint_type']),
+                            "issue_description": complaint_data_from_excel_row.get(t['issue_description']),
+                            "cs_media_links": complaint_data_from_excel_row.get(t['cs_media_links']), 
+                            "status": complaint_data_from_excel_row.get(t['status']),
+                            "shipping_response": complaint_data_from_excel_row.get(t['shipping_response']),
+                            "shipping_response_date": complaint_data_from_excel_row.get(t['shipping_response_date_kpi']), 
+                            "shipping_response_time": complaint_data_from_excel_row.get(t['shipping_response_time_kpi']), 
+                            "shipping_media_links": complaint_data_from_excel_row.get(t['shipping_media_links']), 
+                            "shipping_response_employee_name": complaint_data_from_excel_row.get(t['shipping_employee_name']),
+                            "cs_comments": complaint_data_from_excel_row.get(t['cs_comments_section']), 
+                            "has_new_cs_comment": complaint_data_from_excel_row.get(t['new_comment_from_cs'], False), # Boolean
+                            "shipping_comments": complaint_data_from_excel_row.get(t['shipping_comments_section']), 
+                            "is_deleted": complaint_data_from_excel_row.get("تم الأرشفة", False), # Assuming "تم الأرشفة" is the column name in exported Excel
+                            "deleted_at": complaint_data_from_excel_row.get("تاريخ الأرشفة", None),
+                            "deleted_by": complaint_data_from_excel_row.get("تم الأرشفة بواسطة", "")
+                        }
+                        
+                        if add_or_update_complaint_from_excel_to_firestore(mapped_data):
+                            success_count += 1
+                        else:
+                            fail_count += 1
+
+                st.success(f"اكتمل الرفع: تم حفظ/تحديث {success_count} شكوى بنجاح، وفشل {fail_count} شكوى.")
+                st.session_state.complaints = load_complaints_from_firestore() # Reload after import
+                st.rerun() # Refresh app to show updated data
+        except Exception as e:
+            st.error(f"حدث خطأ أثناء قراءة أو معالجة ملف Excel للشكاوى: {e}")
 
     st.markdown("<div class='section-separator'></div>", unsafe_allow_html=True)
 
@@ -1962,21 +2192,17 @@ def manager_dashboard():
         today = datetime.today().date()
         date_range_input = st.date_input(f"📅 {t['filter_by_date']}", value=(today, today), key="manager_date_filter")
         
+        # Ensure date_range_input is always a tuple of two dates, even if only one date is selected
         if isinstance(date_range_input, tuple) and len(date_range_input) == 2:
             start_date, end_date = date_range_input
         elif isinstance(date_range_input, date):
             start_date = date_range_input
             end_date = date_range_input
         else: # Fallback for unexpected scenarios (e.g., empty or malformed input)
+            # This should ideally not happen with st.date_input, but as a safeguard
             st.warning("يرجى تحديد تاريخ البداية والنهاية من الفلتر بشكل صحيح لعرض البيانات.")
             start_date = today # Set to today to prevent further errors
             end_date = today    # Set to today to prevent further errors
-        
-        # Ensure start_date and end_date are always date objects
-        if isinstance(start_date, datetime):
-            start_date = start_date.date()
-        if isinstance(end_date, datetime):
-            end_date = end_date.date()
         
     with col_filter2:
         # Ensure df_complaints is not empty before attempting to get unique complaint types
@@ -1988,10 +2214,13 @@ def manager_dashboard():
         complaint_type_filter = st.selectbox(f"📂 {t['filter_by_type']}", options=complaint_types, key="manager_type_filter")
 
     filtered_df = df_complaints.copy()
-    if not filtered_df.empty and (start_date and end_date): # Ensure dates are not None
+    if not filtered_df.empty and (start_date is not None and end_date is not None): # Ensure dates are not None
+        # Filter out NaT values from 'date' column before comparison
+        # Important: Ensure 'date' column contains actual date objects for direct comparison
+        filtered_df = filtered_df[pd.notna(filtered_df['date'])] # Keep only rows where 'date' is not NaT
         filtered_df = filtered_df[
-            (filtered_df["date"].dt.date >= start_date) & 
-            (filtered_df["date"].dt.date <= end_date)
+            (filtered_df["date"] >= start_date) & 
+            (filtered_df["date"] <= end_date)
         ]
     
     if complaint_type_filter != t['all'] and not filtered_df.empty:
@@ -2084,8 +2313,8 @@ def manager_dashboard():
         filtered_df['cs_comments_display'] = filtered_df['cs_comments'].apply(format_comments_for_dataframe_display)
         filtered_df['shipping_comments_display'] = filtered_df['shipping_comments'].apply(format_comments_for_dataframe_display)
 
-        # Drop original list columns before passing to data_editor
-        df_for_editor = filtered_df.drop(columns=['cs_comments', 'shipping_comments']).copy()
+        # Drop original list columns and the temporary datetime columns
+        df_for_editor = filtered_df.drop(columns=['cs_comments', 'shipping_comments', 'complaint_datetime', 'shipping_response_datetime']).copy()
         
         # Add 'اختر للحذف' column for the manager if not already present
         if 'اختر للحذف' not in df_for_editor.columns:
@@ -2112,7 +2341,10 @@ def manager_dashboard():
                 "cs_comments_display": t['cs_comments_section'], # Rename cs_comments to display formatted text
                 "has_new_cs_comment": t['new_comment_from_cs'], # Rename new flag
                 "shipping_comments_display": t['shipping_comments_section'], # Rename shipping comments to display formatted text
-                "doc_id": "معرف المستند" # Display doc_id for manager to select for deletion
+                "doc_id": "معرف المستند", # Display doc_id for manager to select for deletion
+                "is_deleted": "تم الأرشفة", # Display soft delete status
+                "deleted_at": "تاريخ الأرشفة",
+                "deleted_by": "تم الأرشفة بواسطة"
             }),
             column_config={
                 "اختر للحذف": st.column_config.CheckboxColumn( # This checkbox is ONLY for manager
@@ -2125,7 +2357,10 @@ def manager_dashboard():
                 t['shipping_media_links']: st.column_config.ListColumn(t['shipping_media_links'], width="medium"),
                 t['cs_comments_section']: st.column_config.TextColumn(t['cs_comments_section'], width="large"), # Changed to TextColumn
                 t['new_comment_from_cs']: st.column_config.CheckboxColumn(t['new_comment_from_cs'], disabled=True),
-                t['shipping_comments_section']: st.column_config.TextColumn(t['shipping_comments_section'], width="large") # Changed to TextColumn
+                t['shipping_comments_section']: st.column_config.TextColumn(t['shipping_comments_section'], width="large"), # Changed to TextColumn
+                "تم الأرشفة": st.column_config.CheckboxColumn("تم الأرشفة", disabled=True), # Display soft delete status
+                "تاريخ الأرشفة": st.column_config.TextColumn("تاريخ الأرشفة", disabled=True),
+                "تم الأرشفة بواسطة": st.column_config.TextColumn("تم الأرشفة بواسطة", disabled=True)
             },
             key="manager_complaints_table", # Unique key for manager table
             hide_index=True,
@@ -2133,19 +2368,21 @@ def manager_dashboard():
             
         )
 
-        # Manager Delete Logic: Robustly check for the column before accessing
+        # Manager Soft Delete Logic: Robustly check for the column before accessing
         if 'اختر للحذف' in edited_df_manager.columns:
             selected_for_deletion_docs = edited_df_manager[edited_df_manager['اختر للحذف'] == True]['معرف المستند'].tolist()
 
             if selected_for_deletion_docs:
                 st.warning(t['confirm_delete'])
                 if st.button(f"**{t['delete_complaint']}**", key="manager_delete_complaints_btn"):
+                    manager_name = st.session_state.get('manager_name_default', 'Unknown Manager')
                     for doc_id_to_delete in selected_for_deletion_docs:
-                        delete_complaint_from_firestore(doc_id_to_delete)
-                    st.session_state.complaints = load_complaints_from_firestore() # Reload after deletion
+                        # Call soft delete function
+                        soft_delete_complaint_in_firestore(doc_id_to_delete, manager_name)
+                    st.session_state.complaints = load_complaints_from_firestore() # Reload after soft deletion
                     st.rerun()
             elif not filtered_df.empty: # Only show this message if there are complaints but none selected for deletion
-                st.info("اختر شكاوى من الجدول أعلاه لحذفها.")
+                st.info("اختر شكاوى من الجدول أعلاه لأرشفتها (الحذف الناعم).")
         else: # Fallback if 'اختر للحذف' column is unexpectedly missing
             st.info("لم يتم تفعيل خيار الحذف. يرجى التأكد من صلاحيات العرض.")
 
@@ -2159,11 +2396,11 @@ def manager_dashboard():
         # Drop columns that shouldn't be in Excel or are internal/temporary
         columns_to_drop_for_excel = [
             'اختر للحذف', # This is a UI checkbox
-            'doc_id',     # Internal Firestore ID
-            'cs_comments', # Original list
-            'shipping_comments', # Original list
-            'complaint_datetime', # Temporary for calculation
-            'shipping_response_datetime' # Temporary for calculation
+            'doc_id',      # Internal Firestore ID
+            # 'cs_comments', # Original list - these are now replaced by formatted_display columns
+            # 'shipping_comments', # Original list - these are now replaced by formatted_display columns
+            # 'complaint_datetime', # Temporary for calculation - already dropped above
+            # 'shipping_response_datetime' # Temporary for calculation - already dropped above
         ]
         # Filter out columns that might not exist to prevent errors
         columns_to_drop_for_excel = [col for col in columns_to_drop_for_excel if col in df_for_excel.columns]
