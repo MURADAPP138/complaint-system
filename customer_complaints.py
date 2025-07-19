@@ -214,7 +214,7 @@ t = translations["ar"]
 PASSWORDS = {
     t['customer_service']: "123456",
     t['shipping_team']: "987456",
-    t['manager']: "5723"
+    t['manager']: "km5723"
 }
 
 # --- Session State Management ---
